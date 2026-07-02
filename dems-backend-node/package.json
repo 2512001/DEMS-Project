@@ -1,0 +1,21 @@
+{
+  "name": "dems-backend-node",
+  "version": "1.0.0",
+  "main": "App.js",
+  "scripts": {
+    "start": "node app.js",
+    "dev": "nodemon app.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "API Gateway for the Decentralized Evidence Management System",
+  "dependencies": {
+    "axios": "^1.18.1",
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "mongoose": "^9.7.3",
+    "multer": "^2.2.0"
+  }
+}
