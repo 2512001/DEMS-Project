@@ -2,16 +2,16 @@ Node.js
 
 node_modules/
 npm-debug.log
-.env
+
 
 Python
 
 pycache/
 *.py[cod]
 *$py.class
-venv/
+v/
 env/
-.env
+.
 
 Blockchain / Hardhat
 

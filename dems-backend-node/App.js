@@ -1,33 +1,35 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
-const { connect }  = require("./connectionDb/connectDb");
-const evidenceRoutes  = require('./routes/evidenceRoutes');
+const { connect } = require("./connectionDb/connectDb");
+const evidenceRoutes = require('./routes/evidenceRoutes');
+const authRoutes = require('./routes/authRoutes');
+const adminRoutes = require('./routes/adminRoutes');
+const mongoose = require("mongoose");
 
 
 //connect database 
 connect();
 
+
+
+
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 // 1. Middlewares
-// Enable CORS for frontend communication
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-//APi 
-app.get('/health', (req, res) => {
-    res.status(200).json({
-        status: 'Active',
-        message: 'DEMS API Gateway is running smoothly.'
-    });
-});
 
 
 //router middleware
-app.use('/api/Evidence' , evidenceRoutes);
+app.use('/api/auth', authRoutes);
+app.use('/api/admin', adminRoutes);
+app.use('/api/evidence', evidenceRoutes);
+app.use('/api/Evidence', evidenceRoutes);
 
 
 
@@ -49,7 +51,7 @@ app.use((err, req, res, next) => {
     });
 });
 
-// 5. Start Server
+
 app.listen(PORT, () => {
     console.log(`=========================================`);
     console.log(`🚀 DEMS API Gateway running on port ${PORT}`);

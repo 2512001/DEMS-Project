@@ -2,9 +2,9 @@ const mongoose = require('mongoose');
 const { Schema } = mongoose;
 
 const evidenceSchema = new Schema({
-    User: {
+    user: {
         type: mongoose.Schema.Types.ObjectId,
-        rel: 'User',
+        ref: 'User',
         required: true,
         index: true
 
@@ -12,7 +12,9 @@ const evidenceSchema = new Schema({
     UploaderWallet: {
         type: String,
         required: true,
-        lowercase: true
+        lowercase: true,
+        index: true
+
     },
     caseId: {
         type: String,
@@ -43,6 +45,11 @@ const evidenceSchema = new Schema({
         type: String,
         default: null // The hash returned by Pinata/IPFS (Where the file actually lives)
     },
+    encryption: {
+        iv: { type: String, default: null },
+        authTag: { type: String, default: null },
+        algorithm: { type: String, default: 'aes-256-gcm' }
+    },
     blockchainTxHash: {
         type: String,
         default: null // The transaction ID on Polygon proving this was logged immutably
@@ -57,7 +64,7 @@ const evidenceSchema = new Schema({
     // 6. Pipeline Status
     status: {
         type: String,
-        enum: ['processing', 'encrypted', 'stored_on_chain', 'flagged_by_ai', 'error'],
+        enum: ['processing', 'encrypted', 'pending_blockchain', 'stored_on_chain', 'flagged_by_ai', 'error'],
         default: 'processing'
     },
     statusMessage: {
