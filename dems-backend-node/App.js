@@ -5,11 +5,19 @@ const { connect } = require("./connectionDb/connectDb");
 const evidenceRoutes = require('./routes/evidenceRoutes');
 const authRoutes = require('./routes/authRoutes');
 const adminRoutes = require('./routes/adminRoutes');
+const quarantineRoutes = require('./routes/quarantineRoutes');
+const modificationRoutes = require('./routes/modificationRoutes');
+const organizationRoutes = require('./routes/organizationRoutes');
+const invitationRoutes = require('./routes/invitationRoutes');
+const { initializeTransporter } = require('./services/emailService');
 const mongoose = require("mongoose");
 
 
 //connect database 
 connect();
+
+// Initialize email service
+initializeTransporter();
 
 
 
@@ -30,6 +38,10 @@ app.use('/api/auth', authRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/evidence', evidenceRoutes);
 app.use('/api/Evidence', evidenceRoutes);
+app.use('/api/quarantine', quarantineRoutes);
+app.use('/api/modifications', modificationRoutes);
+app.use('/api/organization', organizationRoutes);
+app.use('/api/invitations', invitationRoutes);
 
 
 
@@ -43,11 +55,14 @@ app.use((req, res, next) => {
 
 // Global Error Handler
 app.use((err, req, res, next) => {
-    console.error(`[Error]: ${err.message}`);
-    res.status(500).json({
+ //   console.error(`[Error]: ${err.message}`);
+    const status = err.statusCode || 500;
+    const isUploadError = err.message === 'Unsupported file type.' || err.code === 'LIMIT_FILE_SIZE';
+    res.status(isUploadError ? 400 : status).json({
         success: false,
-        message: 'Internal Server Error',
-        error: process.env.NODE_ENV === 'development' ? err.message : {}
+        message: isUploadError
+            ? (err.code === 'LIMIT_FILE_SIZE' ? 'File exceeds the 50MB upload limit.' : err.message)
+            : (status === 500 ? 'Internal Server Error' : err.message)
     });
 });
 

@@ -78,39 +78,58 @@ contract EvidenceRegistry is AccessControl {
      * @param uploaderWallet Must equal msg.sender — prevents wallet spoofing while keeping frontend ABI stable.
      */
     function addEvidence(
-        string calldata evidenceId,
-        string calldata fileHash,
-        string calldata ipfsCID,
-        uint256 aiScore,
-        address uploaderWallet
-    ) external onlyRole(OFFICER_ROLE) {
-        _validateEvidenceInputs(evidenceId, fileHash, ipfsCID);
-        if (uploaderWallet != msg.sender) revert UploaderMismatch();
+    string calldata evidenceId,
+    string calldata fileHash,
+    string calldata ipfsCID,
+    uint256 aiScore,
+    address uploaderWallet
+) external {
+    // TEMPORARY: Evidence upload is open to all users during development.
+    // Access control can be restricted later using onlyRole(OFFICER_ROLE)
+    // or another appropriate role when the final authorization rules are decided.
 
-        bytes32 idHash = keccak256(bytes(evidenceId));
-        if (_evidenceIdExists[idHash]) revert EvidenceAlreadyExists();
+    _validateEvidenceInputs(evidenceId, fileHash, ipfsCID);
 
-        bytes32 hashKey = keccak256(bytes(fileHash));
-        if (_fileHashExists[hashKey]) revert FileHashAlreadyExists();
+    if (uploaderWallet != msg.sender) revert UploaderMismatch();
 
-        _evidenceIdExists[idHash] = true;
-        _fileHashExists[hashKey] = true;
-        unchecked {
-            _uploaderEvidenceCount[msg.sender]++;
-        }
+    bytes32 idHash = keccak256(bytes(evidenceId));
+    if (_evidenceIdExists[idHash]) revert EvidenceAlreadyExists();
 
-        Evidence storage record = _evidenceById[idHash];
-        record.evidenceId = evidenceId;
-        record.fileHash = fileHash;
-        record.ipfsCID = ipfsCID;
-        record.aiScore = aiScore;
-        record.timestamp = block.timestamp;
-        record.uploaderWallet = msg.sender;
-        record.exists = true;
+    bytes32 hashKey = keccak256(bytes(fileHash));
+    if (_fileHashExists[hashKey]) revert FileHashAlreadyExists();
 
-        emit EvidenceAdded(evidenceId, fileHash, ipfsCID, aiScore, block.timestamp, msg.sender);
-        _appendCustodyEvent(idHash, evidenceId, msg.sender, "UPLOAD");
+    _evidenceIdExists[idHash] = true;
+    _fileHashExists[hashKey] = true;
+
+    unchecked {
+        _uploaderEvidenceCount[msg.sender]++;
     }
+
+    Evidence storage record = _evidenceById[idHash];
+    record.evidenceId = evidenceId;
+    record.fileHash = fileHash;
+    record.ipfsCID = ipfsCID;
+    record.aiScore = aiScore;
+    record.timestamp = block.timestamp;
+    record.uploaderWallet = msg.sender;
+    record.exists = true;
+
+    emit EvidenceAdded(
+        evidenceId,
+        fileHash,
+        ipfsCID,
+        aiScore,
+        block.timestamp,
+        msg.sender
+    );
+
+    _appendCustodyEvent(
+        idHash,
+        evidenceId,
+        msg.sender,
+        "UPLOAD"
+    );
+}
 
     function getEvidence(
         string calldata evidenceId
@@ -158,19 +177,42 @@ contract EvidenceRegistry is AccessControl {
         return _uploaderEvidenceCount[wallet];
     }
 
-    function addCustodyEvent(string calldata evidenceId, string calldata action) external onlyRole(OFFICER_ROLE) {
-        if (bytes(action).length == 0) revert InvalidInput();
+function addCustodyEvent(
+    string calldata evidenceId,
+    string calldata action
+) external {
+    // TEMPORARY: Custody events are open to all users during development.
+    // Access control can be restricted later using onlyRole(OFFICER_ROLE).
 
-        bytes32 idHash = keccak256(bytes(evidenceId));
-        if (!_evidenceIdExists[idHash]) revert EvidenceNotFound();
+    if (bytes(action).length == 0) revert InvalidInput();
 
-        _appendCustodyEvent(idHash, evidenceId, msg.sender, action);
+    bytes32 idHash = keccak256(bytes(evidenceId));
 
-        if (keccak256(bytes(action)) == keccak256(bytes("VERIFIED"))) {
-            Evidence storage record = _evidenceById[idHash];
-            emit EvidenceVerified(evidenceId, record.fileHash, msg.sender, block.timestamp);
-        }
+    if (!_evidenceIdExists[idHash]) {
+        revert EvidenceNotFound();
     }
+
+    _appendCustodyEvent(
+        idHash,
+        evidenceId,
+        msg.sender,
+        action
+    );
+
+    if (
+        keccak256(bytes(action)) ==
+        keccak256(bytes("VERIFIED"))
+    ) {
+        Evidence storage record = _evidenceById[idHash];
+
+        emit EvidenceVerified(
+            evidenceId,
+            record.fileHash,
+            msg.sender,
+            block.timestamp
+        );
+    }
+}
 
     function getCustodyHistory(string calldata evidenceId) external view returns (CustodyEvent[] memory) {
         bytes32 idHash = keccak256(bytes(evidenceId));

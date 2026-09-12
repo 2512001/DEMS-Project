@@ -25,7 +25,8 @@ OS generated files
 .DS_Store
 Thumbs.db
 
-Frontend / React
+uploads/
+quarantine-store/
 
 build/
 dist/

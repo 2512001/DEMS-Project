@@ -7,70 +7,141 @@ const evidenceSchema = new Schema({
         ref: 'User',
         required: true,
         index: true
-
+    },
+    organizationId: {
+        type: Schema.Types.ObjectId,
+        ref: 'Organization',
+        default: null,
+        index: true
     },
     UploaderWallet: {
         type: String,
         required: true,
         lowercase: true,
         index: true
-
     },
     caseId: {
         type: String,
-        default: null // Optional: Law enforcement can group evidence by Case Number
+        default: null
     },
-     // 3. SECURE HARDWARE METADATA (What you just suggested!)
     captureMetadata: {
-        deviceInfo: { type: String, required: true }, // e.g., "iPhone 14 Pro - IMEI: 8472910"
+        deviceInfo: { type: String, required: true },
         gpsLocation: {
             latitude: { type: Number, required: true },
             longitude: { type: Number, required: true }
         },
-        capturedAt: { type: Date, required: true } // The exact hardware time the photo was taken
+        capturedAt: { type: Date, required: true }
     },
     fileName: { type: String, required: true },
-    mimeType: { type: String, required: true }, // e.g., 'image/jpeg', 'video/mp4'
+    mimeType: { type: String, required: true },
     fileSize: { type: Number, required: true },
     fileHash: {
         type: String,
         required: true,
-        unique: true // SHA-256 hash of the raw file. Prevents duplicate uploads.
+        unique: true
     },
     encryptionMethod: {
         type: String,
-        default: 'AES-256' // Documents how it was secured before IPFS
+        default: 'AES-256'
     },
     ipfsCID: {
         type: String,
-        default: null // The hash returned by Pinata/IPFS (Where the file actually lives)
+        default: null
     },
     encryption: {
         iv: { type: String, default: null },
         authTag: { type: String, default: null },
         algorithm: { type: String, default: 'aes-256-gcm' }
     },
+    blockchainRequested: {
+        type: Boolean,
+        default: false
+    },
     blockchainTxHash: {
         type: String,
-        default: null // The transaction ID on Polygon proving this was logged immutably
+        default: null
     },
-    // 5. AI Verification Results
     aiAnalysis: {
-        score: { type: Number, default: 0 },         // e.g., 98.5% genuine
+        requested: { type: Boolean, default: false },
+        authenticityScore: { type: Number, default: null },
+        tamperingScore: { type: Number, default: null },
+        deepfakeScore: { type: Number, default: null },
+        deepfakeDetected: { type: Boolean, default: false },
+        tamperingDetected: { type: Boolean, default: false },
+        confidence: { type: Number, default: null },
+        explanation: { type: String, default: '' },
+        modelVersion: { type: String, default: '' },
+        analyzedAt: { type: Date, default: null },
+        score: { type: Number, default: 0 },
         isDeepfake: { type: Boolean, default: false },
-        metadataMatch: { type: Boolean, default: true } // Did GPS EXIF data match?
+        metadataMatch: { type: Boolean, default: true }
     },
-
-    // 6. Pipeline Status
+    processingStatus: {
+        type: String,
+        enum: ['processing', 'completed', 'failed'],
+        default: 'processing'
+    },
+    reviewStatus: {
+        type: String,
+        enum: ['not_required', 'pending', 'approved', 'rejected'],
+        default: 'not_required'
+    },
+    storageStatus: {
+        type: String,
+        enum: ['not_stored', 'quarantine', 'ipfs', 'failed'],
+        default: 'not_stored'
+    },
+    blockchainStatus: {
+        type: String,
+        enum: ['not_requested', 'pending', 'confirmed', 'failed'],
+        default: 'not_requested'
+    },
+    versionNumber: {
+        type: Number,
+        default: 1
+    },
+    previousVersion: {
+        type: Schema.Types.ObjectId,
+        ref: 'Evidence',
+        default: null
+    },
+    versionHistory: [{
+        versionNumber: { type: Number, required: true },
+        caseId: { type: String, default: null },
+        changeReason: { type: String, default: '' },
+        changedBy: { type: Schema.Types.ObjectId, ref: 'User', default: null },
+        approvedBy: { type: Schema.Types.ObjectId, ref: 'User', default: null },
+        approvedAt: { type: Date, default: null },
+        snapshotAt: { type: Date, default: Date.now }
+    }],
+    changedBy: { type: Schema.Types.ObjectId, ref: 'User', default: null },
+    changeReason: { type: String, default: '' },
+    approvedBy: { type: Schema.Types.ObjectId, ref: 'User', default: null },
+    approvedAt: { type: Date, default: null },
+    quarantineId: {
+        type: Schema.Types.ObjectId,
+        ref: 'QuarantineEvidence',
+        default: null
+    },
     status: {
         type: String,
-        enum: ['processing', 'encrypted', 'pending_blockchain', 'stored_on_chain', 'flagged_by_ai', 'error'],
+        enum: [
+            'processing',
+            'encrypted',
+            'pending_blockchain',
+            'stored_on_chain',
+            'flagged_by_ai',
+            'quarantine',
+            'rejected',
+            'stored_ipfs',
+            'error'
+        ],
         default: 'processing'
     },
     statusMessage: {
         type: String,
-        default: 'Initializing secure upload...' // Granular, user-friendly message for the live UI
+        default: 'Initializing secure upload...'
     }
-
 }, { timestamps: true });
-module.exports = mongoose.model("Evidence", evidenceSchema);
+
+module.exports = mongoose.model('Evidence', evidenceSchema);

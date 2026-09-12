@@ -11,7 +11,7 @@ const verifyEvidenceBlockchain = async (req, res, next) => {
             });
         }
 
-        const result = await verifyEvidenceIntegrity(id);
+        const result = await verifyEvidenceIntegrity(id, req.user);
 
         return res.status(200).json({
             success: true,
@@ -28,7 +28,7 @@ const verifyEvidenceBlockchain = async (req, res, next) => {
         if (err.code === 'EVIDENCE_NOT_ON_CHAIN') {
             return res.status(422).json({
                 success: false,
-                message: err.message
+                message: 'This evidence has no immutable on-chain proof. Blockchain integrity verification is unavailable.'
             });
         }
 

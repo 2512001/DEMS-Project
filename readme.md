@@ -239,9 +239,13 @@ npm run dev
 ## 12. Final Notes
 
 - Make sure MongoDB is running.
+
 - Make sure MetaMask is connected.
+
 - Make sure Pinata credentials are added.
+
 - Make sure the contract address is copied into frontend .env.
+
 - Keep your .env files private and local.
 
 If you want, I can also make this README more professional with screenshots, architecture flow, and a one-click setup script next.

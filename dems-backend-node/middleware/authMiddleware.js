@@ -16,16 +16,21 @@ const protect = async (req, res, next) => {
         }
 
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
-        const user = await User.findById(decoded.id).select('_id walletAddress role');
+        const user = await User.findById(decoded.id).select('_id walletAddress role organizationId accountStatus');
 
         if (!user) {
             return res.status(401).json({ success: false, message: 'Authenticated user no longer exists.' });
         }
 
+        if (user.accountStatus === 'suspended') {
+            return res.status(403).json({ success: false, message: 'This account is suspended.' });
+        }
+
         req.user = {
             id: user._id.toString(),
             role: user.role,
-            walletAddress: user.walletAddress
+            walletAddress: user.walletAddress,
+            organizationId: user.organizationId ? user.organizationId.toString() : null
         };
 
         next();

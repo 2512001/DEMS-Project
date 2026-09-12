@@ -6,10 +6,14 @@ let cachedContract = null;
 
 function getContractConfig() {
     const contractAddress = process.env.EVIDENCE_CONTRACT_ADDRESS;
-    const rpcUrl = process.env.RPC_URL || 'http://127.0.0.1:8545';
+    const rpcUrl = process.env.RPC_URL;
 
     if (!contractAddress) {
         throw new Error('EVIDENCE_CONTRACT_ADDRESS is not configured on the server.');
+    }
+
+    if (!rpcUrl) {
+        throw new Error('RPC_URL is not configured on the server.');
     }
 
     return { contractAddress, rpcUrl };

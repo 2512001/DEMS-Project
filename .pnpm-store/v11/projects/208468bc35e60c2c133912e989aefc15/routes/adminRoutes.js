@@ -1,9 +1,11 @@
 const express = require('express');
 const {
     submitVerificationRequest,
+    submitVerificationRequestByCode,
     getUsers,
     getVerificationRequests,
     reviewVerificationRequest,
+    reviewMembershipApplication,
     getAuditLogs,
     upgradeOfficer
 } = require('../controllers/adminController');
@@ -25,8 +27,21 @@ router.post(
     ]),
     submitVerificationRequest
 );
+router.post(
+    '/verification-request-by-code',
+    protect,
+    authorizeRoles('citizen', 'officer', 'admin'),
+    upload.fields([
+        { name: 'badge', maxCount: 1 },
+        { name: 'governmentId', maxCount: 1 },
+        { name: 'aadhaar', maxCount: 1 },
+        { name: 'supportingDocuments', maxCount: 8 }
+    ]),
+    submitVerificationRequestByCode
+);
 router.get('/verification-requests', protect, authorizeRoles('admin'), getVerificationRequests);
 router.post('/verification-requests/review', protect, authorizeRoles('admin'), reviewVerificationRequest);
+router.post('/membership-applications/review', protect, authorizeRoles('admin'), reviewMembershipApplication);
 router.get('/users', protect, authorizeRoles('admin'), getUsers);
 router.get('/audit-logs', protect, authorizeRoles('admin'), getAuditLogs);
 router.post('/upgrade-officer', protect, authorizeRoles('admin'), upgradeOfficer);

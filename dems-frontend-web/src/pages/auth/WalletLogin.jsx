@@ -13,7 +13,15 @@ export default function WalletLogin() {
     try {
       const verified = await loginWithWallet();
       const role = verified.user.role;
-      navigate(role === 'admin' ? '/admin/dashboard' : role === 'officer' ? '/officer/dashboard' : '/citizen/dashboard', { replace: true });
+      if (role === 'super_admin') {
+        navigate('/superadmin/dashboard', { replace: true });
+      } else if (role === 'admin') {
+        navigate('/admin/dashboard', { replace: true });
+      } else if (role === 'officer') {
+        navigate('/officer/dashboard', { replace: true });
+      } else {
+        navigate('/citizen/dashboard', { replace: true });
+      }
     } finally {
       setBusy(false);
     }

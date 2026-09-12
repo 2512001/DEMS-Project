@@ -28,7 +28,7 @@ export async function connectMetaMask() {
   return provider.getSigner();
 }
 
-export async function ensureSepolia() {
+export async function ensureRequiredNetwork() {
   if (!hasMetaMask()) {
     throw new Error('MetaMask is required.');
   }

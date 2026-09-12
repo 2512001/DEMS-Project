@@ -14,9 +14,20 @@ const userSchema = new Schema({
     },
     role: {
         type: String,
-        enum: ['citizen', 'officer', 'admin'],
+        enum: ['citizen', 'officer', 'admin', 'super_admin'],
         default: 'citizen',
         index: true
+    },
+    organizationId: {
+        type: Schema.Types.ObjectId,
+        ref: 'Organization',
+        default: null,
+        index: true
+    },
+    accountStatus: {
+        type: String,
+        enum: ['active', 'suspended', 'pending'],
+        default: 'active'
     },
     nonce: {
         type: String,
@@ -25,8 +36,33 @@ const userSchema = new Schema({
     },
     profile: {
         displayName: { type: String, default: '' },
-        email: { type: String, default: '' }
+        email: { type: String, default: '' },
+        phone: { type: String, default: '' },
+        department: { type: String, default: '' },
+        designation: { type: String, default: '' },
+        employeeId: { type: String, default: '' }
     },
+    // Employee membership status
+    membershipStatus: {
+        type: String,
+        enum: ['none', 'pending_approval', 'active', 'suspended', 'rejected'],
+        default: 'none',
+        index: true
+    },
+    membershipReviewedBy: {
+        type: Schema.Types.ObjectId,
+        ref: 'User',
+        default: null
+    },
+    membershipReviewedAt: {
+        type: Date,
+        default: null
+    },
+    membershipRejectionReason: {
+        type: String,
+        default: ''
+    },
+    // Legacy officer verification for backward compatibility
     officerVerification: {
         status: {
             type: String,
@@ -45,10 +81,11 @@ const userSchema = new Schema({
             size: Number,
             uploadedAt: { type: Date, default: Date.now }
         }],
-        rejectionReason: { type: String, default: 'pending' },
+        rejectionReason: { type: String, default: '' },
         reviewedBy: { type: Schema.Types.ObjectId, ref: 'User', default: null },
         reviewedAt: { type: Date, default: null },
-        requestedAt: { type: Date, default: null }
+        requestedAt: { type: Date, default: null },
+        requestedOrganizationId: { type: Schema.Types.ObjectId, ref: 'Organization', default: null }
     }
 }, { timestamps: true });
 

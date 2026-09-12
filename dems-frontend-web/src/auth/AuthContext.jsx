@@ -9,7 +9,7 @@ import React, {
 import { useQueryClient } from '@tanstack/react-query';
 import { installAuthInterceptors } from '../api/client.js';
 import { getMe, requestNonce, verifySignature } from '../api/auth.js';
-import { connectMetaMask, ensureSepolia, getWalletState, SEPOLIA_CHAIN_HEX } from '../blockchain/wallet.js';
+import { connectMetaMask, ensureRequiredNetwork , getWalletState, REQUIRED_CHAIN_HEX  } from '../blockchain/wallet.js';
 
 const STORAGE_KEY = 'dems.auth';
 const AuthContext = createContext(null);
@@ -90,7 +90,7 @@ export function AuthProvider({ children }) {
     setAuthStatus('connecting');
     setAuthError('');
     try {
-      await ensureSepolia();
+      await ensureRequiredNetwork();
       const signer = await connectMetaMask();
       const address = (await signer.getAddress()).toLowerCase();
       const nonce = await requestNonce(address);
@@ -99,7 +99,7 @@ export function AuthProvider({ children }) {
       setToken(verified.token);
       setUser(verified.user);
       setWalletAddress(verified.user.walletAddress);
-      setChainId(SEPOLIA_CHAIN_HEX);
+      setChainId(REQUIRED_CHAIN_HEX);
       setAuthStatus('authenticated');
       return verified;
     } catch (error) {
@@ -122,13 +122,13 @@ export function AuthProvider({ children }) {
     walletAddress,
     chainId,
     isAuthenticated: Boolean(token && user),
-    isSepolia: chainId === SEPOLIA_CHAIN_HEX,
+    isSepolia: chainId === REQUIRED_CHAIN_HEX ,
     authStatus,
     authError,
     loginWithWallet,
     logout,
     refreshUser,
-    forceSepolia: ensureSepolia
+    forceSepolia: ensureRequiredNetwork
   }), [token, user, walletAddress, chainId, authStatus, authError, loginWithWallet, logout, refreshUser]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

@@ -2,6 +2,7 @@ const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 const { ethers } = require('ethers');
 const User = require('../model/userModel');
+const { writeAuditLog } = require('../services/auditService');
 
 const isValidWalletAddress = (walletAddress) => ethers.isAddress(walletAddress || '');
 
@@ -18,13 +19,24 @@ const generateNonce = async (req, res, next) => {
         }
 
         const nonce = crypto.randomBytes(32).toString('hex');
-        const user = await User.findOneAndUpdate(
-            { walletAddress },
-            { $set: { nonce }, $setOnInsert: { role: 'citizen' } },
-            { new: true, upsert: true, setDefaultsOnInsert: true }
-        );
+        
+        // Check if user exists first
+        let user = await User.findOne({ walletAddress });
+        
+        if (user) {
+            // Update existing user's nonce only - never change role
+            user.nonce = nonce;
+            await user.save();
+        } else {
+            // Create new user with default citizen role
+            user = await User.create({
+                walletAddress,
+                nonce,
+                role: 'citizen'
+            });
+        }
 
-        console.log(`[AUTH] Nonce issued for wallet=${walletAddress}`);
+        console.log(`[AUTH] Nonce issued for wallet=${walletAddress}, role=${user.role}`);
 
         return res.status(200).json({
             success: true,
@@ -71,12 +83,20 @@ const verifySignature = async (req, res, next) => {
         const payload = {
             id: user._id.toString(),
             role: user.role,
-            walletAddress: user.walletAddress
+            walletAddress: user.walletAddress,
+            organizationId: user.organizationId ? user.organizationId.toString() : null
         };
 
         const token = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: process.env.JWT_EXPIRES_IN || '1d' });
 
-        console.log(`[AUTH] Wallet verified wallet=${walletAddress} role=${user.role}`);
+        await writeAuditLog({
+            actor: payload,
+            organizationId: payload.organizationId,
+            action: 'user_login',
+            targetType: 'user',
+            targetId: payload.id,
+            result: 'success'
+        });
 
         return res.status(200).json({
             success: true,
@@ -95,7 +115,7 @@ const verifySignature = async (req, res, next) => {
 const getMe = async (req, res, next) => {
     try {
         const user = await User.findById(req.user.id)
-            .select('_id walletAddress role profile officerVerification createdAt updatedAt');
+            .select('_id walletAddress role organizationId profile officerVerification createdAt updatedAt');
 
         return res.status(200).json({ success: true, user });
     } catch (err) {
@@ -114,7 +134,7 @@ const updateProfile = async (req, res, next) => {
             req.user.id,
             { $set: { profile } },
             { new: true }
-        ).select('_id walletAddress role profile officerVerification createdAt updatedAt');
+        ).select('_id walletAddress role organizationId profile officerVerification createdAt updatedAt');
 
         return res.status(200).json({ success: true, message: 'Profile updated.', user });
     } catch (err) {

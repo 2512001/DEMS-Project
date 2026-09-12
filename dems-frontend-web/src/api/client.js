@@ -7,8 +7,15 @@ export const apiClient = axios.create({
   timeout: 30000
 });
 
+let interceptorsInstalled = false;
+
 export function installAuthInterceptors(getToken, onUnauthorized) {
-  apiClient.interceptors.request.use((config) => {
+  // Prevent duplicate interceptors
+  if (interceptorsInstalled) {
+    return;
+  }
+
+  const requestInterceptor = apiClient.interceptors.request.use((config) => {
     const token = getToken();
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
@@ -16,7 +23,7 @@ export function installAuthInterceptors(getToken, onUnauthorized) {
     return config;
   });
 
-  apiClient.interceptors.response.use(
+  const responseInterceptor = apiClient.interceptors.response.use(
     (response) => response,
     (error) => {
       if (error.response?.status === 401) {
@@ -25,6 +32,8 @@ export function installAuthInterceptors(getToken, onUnauthorized) {
       return Promise.reject(error);
     }
   );
+
+  interceptorsInstalled = true;
 }
 
 export function apiErrorMessage(error, fallback = 'Request failed.') {
