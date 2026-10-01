@@ -18,22 +18,8 @@ const verifyEvidenceBlockchain = async (req, res, next) => {
             ...result
         });
     } catch (err) {
-        if (err.statusCode) {
+        if (err.statusCode && err.statusCode < 500) {
             return res.status(err.statusCode).json({
-                success: false,
-                message: err.message
-            });
-        }
-
-        if (err.code === 'EVIDENCE_NOT_ON_CHAIN') {
-            return res.status(422).json({
-                success: false,
-                message: 'This evidence has no immutable on-chain proof. Blockchain integrity verification is unavailable.'
-            });
-        }
-
-        if (err.message?.includes('EVIDENCE_CONTRACT_ADDRESS')) {
-            return res.status(503).json({
                 success: false,
                 message: err.message
             });

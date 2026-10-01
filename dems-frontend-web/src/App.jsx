@@ -41,7 +41,7 @@ export default function App() {
         <Route path="/auth" element={<Navigate to="/auth/wallet-login" replace />} />
       </Route>
 
-      <Route element={<RequireAuth roles={['citizen', 'officer', 'admin', 'super_admin']} />}>
+      <Route element={<RequireAuth roles={['citizen', 'officer', 'admin']} />}>
         <Route element={<AppLayout section="citizen" />}>
           <Route path="/citizen" element={<CitizenDashboard />} />
           <Route path="/citizen/dashboard" element={<CitizenDashboard />} />
@@ -52,7 +52,7 @@ export default function App() {
         </Route>
       </Route>
 
-      <Route element={<RequireAuth roles={['officer', 'admin', 'super_admin']} />}>
+      <Route element={<RequireAuth roles={['officer', 'admin']} />}>
         <Route element={<AppLayout section="officer" />}>
           <Route path="/officer" element={<OfficerDashboard />} />
           <Route path="/officer/dashboard" element={<OfficerDashboard />} />
@@ -88,6 +88,9 @@ export default function App() {
       {/* Public invitation routes */}
       <Route path="/invitation/admin/:token" element={<AdminInvitation />} />
       <Route path="/invitation/employee/:token" element={<EmployeeInvitation />} />
+
+      {/* Temporary test route without auth */}
+      <Route path="/test" element={<SuperAdminDashboard />} />
 
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

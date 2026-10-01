@@ -9,15 +9,27 @@ const quarantineRoutes = require('./routes/quarantineRoutes');
 const modificationRoutes = require('./routes/modificationRoutes');
 const organizationRoutes = require('./routes/organizationRoutes');
 const invitationRoutes = require('./routes/invitationRoutes');
-const { initializeTransporter } = require('./services/emailService');
+const analyticsRoutes = require('./routes/analyticsRoutes');
+const otpRoutes = require('./routes/otpRoutes');
+const { initializeTransporter, verifySMTPConnection, isSMTPConfigured } = require('./services/emailService');
 const mongoose = require("mongoose");
 
 
 //connect database 
 connect();
 
-// Initialize email service
-initializeTransporter();
+try {
+  initializeTransporter();
+  if (isSMTPConfigured()) {
+    verifySMTPConnection().then((result) => {
+      if (!result.success) {
+        console.error('[EMAIL] SMTP verify failed:', result.error);
+      }
+    });
+  }
+} catch (error) {
+  console.error('[EMAIL] Failed to initialize email service:', error.message);
+}
 
 
 
@@ -42,6 +54,8 @@ app.use('/api/quarantine', quarantineRoutes);
 app.use('/api/modifications', modificationRoutes);
 app.use('/api/organization', organizationRoutes);
 app.use('/api/invitations', invitationRoutes);
+app.use('/api/analytics', analyticsRoutes);
+app.use('/api/otp', otpRoutes);
 
 
 
@@ -55,14 +69,23 @@ app.use((req, res, next) => {
 
 // Global Error Handler
 app.use((err, req, res, next) => {
- //   console.error(`[Error]: ${err.message}`);
+    console.error('[ERROR]', err.message);
+    if (process.env.NODE_ENV !== 'production' && err.stack) {
+        console.error(err.stack);
+    }
+
+    if (err.name === 'ValidationError') {
+        const message = Object.values(err.errors || {}).map((item) => item.message).join(' ') || err.message;
+        return res.status(400).json({ success: false, message });
+    }
+
     const status = err.statusCode || 500;
     const isUploadError = err.message === 'Unsupported file type.' || err.code === 'LIMIT_FILE_SIZE';
     res.status(isUploadError ? 400 : status).json({
         success: false,
         message: isUploadError
             ? (err.code === 'LIMIT_FILE_SIZE' ? 'File exceeds the 50MB upload limit.' : err.message)
-            : (status === 500 ? 'Internal Server Error' : err.message)
+            : (status === 500 ? (process.env.NODE_ENV === 'production' ? 'Internal Server Error' : err.message) : err.message)
     });
 });
 

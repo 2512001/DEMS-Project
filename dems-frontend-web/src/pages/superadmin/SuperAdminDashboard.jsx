@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Building2, Plus, UserPlus, Check, X, Settings, Users, BarChart3, Mail, Phone, Globe, MapPin, FileText, Eye } from 'lucide-react';
+import { Building2, Plus, UserPlus, Check, X, Settings, Users, BarChart3, Mail, Phone, Globe, MapPin, FileText, Eye, Shield, Activity, TrendingUp, AlertTriangle, Lock, Clock } from 'lucide-react';
 import { listOrganizations, createOrganization, assignOrganizationAdmin, getOrganizationDetails, getOrganizationAdmins } from '../../api/admin.js';
+import { getPlatformAnalytics } from '../../api/analytics.js';
 import { useAuth } from '../../auth/AuthContext.jsx';
 
 export default function SuperAdminDashboard() {
@@ -11,6 +12,8 @@ export default function SuperAdminDashboard() {
   const [showInviteForm, setShowInviteForm] = useState(false);
   const [selectedOrg, setSelectedOrg] = useState(null);
   const [showOrgDetails, setShowOrgDetails] = useState(false);
+  const [notice, setNotice] = useState('');
+  const [activeTab, setActiveTab] = useState('dashboard');
   
   // Create organization form state
   const [newOrgName, setNewOrgName] = useState('');
@@ -40,6 +43,13 @@ export default function SuperAdminDashboard() {
     enabled: user?.role === 'super_admin'
   });
 
+  const platformAnalytics = useQuery({
+    queryKey: ['platform-analytics'],
+    queryFn: getPlatformAnalytics,
+    enabled: user?.role === 'super_admin',
+    refetchInterval: 60000 // Refresh every minute
+  });
+
   const orgDetails = useQuery({
     queryKey: ['organization', selectedOrg],
     queryFn: () => getOrganizationDetails(selectedOrg),
@@ -63,11 +73,17 @@ export default function SuperAdminDashboard() {
 
   const inviteAdmin = useMutation({
     mutationFn: (data) => assignOrganizationAdmin(data),
-    onSuccess: () => {
+    onSuccess: (response, variables) => {
       queryClient.invalidateQueries({ queryKey: ['organizations'] });
       queryClient.invalidateQueries({ queryKey: ['organization-admins', inviteOrgId] });
       setShowInviteForm(false);
       resetInviteForm();
+      const email = variables?.invitedEmail || response?.data?.invitedEmail || 'the recipient';
+      setNotice(`Invitation sent successfully to ${email}`);
+    },
+    onError: (err) => {
+      const details = err.response?.data?.error ? ` ${err.response.data.error}` : '';
+      setNotice(`Failed to send invitation: ${err.response?.data?.message || err.message}${details}`);
     }
   });
 
@@ -148,6 +164,161 @@ export default function SuperAdminDashboard() {
         <h1 className="mb-2 text-2xl font-extrabold">Super Admin Dashboard</h1>
         <p className="text-sm text-slate-400">Platform-level organization administration</p>
       </div>
+
+      {/* Notice Display */}
+      {notice && (
+        <div className={`section-card p-4 ${notice.includes('Failed') || notice.includes('error') ? 'border-red-500/30 bg-red-950/20' : 'border-emerald-500/30 bg-emerald-950/20'}`}>
+          <p className={`text-sm ${notice.includes('Failed') || notice.includes('error') ? 'text-red-300' : 'text-emerald-300'}`}>
+            {notice}
+          </p>
+          <button 
+            className="text-xs text-slate-400 hover:text-white mt-2"
+            onClick={() => setNotice('')}
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+
+      {/* Platform Overview Stats */}
+      {platformAnalytics.data && (
+        <div className="section-card">
+          <div className="flex items-center gap-2 mb-4">
+            <BarChart3 className="text-sky-400" size={24} />
+            <h2 className="text-xl font-bold">Platform Overview</h2>
+          </div>
+          
+          <div className="grid gap-4 md:grid-cols-4 mb-6">
+            <div className="p-4 rounded-lg border border-slate-700 bg-slate-900/50">
+              <p className="text-2xl font-bold text-sky-400">{platformAnalytics.data.overview.totalOrganizations}</p>
+              <p className="text-sm text-slate-400">Total Organizations</p>
+            </div>
+            <div className="p-4 rounded-lg border border-slate-700 bg-slate-900/50">
+              <p className="text-2xl font-bold text-emerald-400">{platformAnalytics.data.overview.activeOrganizations}</p>
+              <p className="text-sm text-slate-400">Active Organizations</p>
+            </div>
+            <div className="p-4 rounded-lg border border-slate-700 bg-slate-900/50">
+              <p className="text-2xl font-bold text-purple-400">{platformAnalytics.data.overview.totalUsers}</p>
+              <p className="text-sm text-slate-400">Total Users</p>
+            </div>
+            <div className="p-4 rounded-lg border border-slate-700 bg-slate-900/50">
+              <p className="text-2xl font-bold text-amber-400">{platformAnalytics.data.overview.totalEvidence}</p>
+              <p className="text-sm text-slate-400">Total Evidence</p>
+            </div>
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-6">
+            <div className="p-3 rounded-lg border border-slate-700 bg-slate-900/50">
+              <p className="text-lg font-bold">{platformAnalytics.data.overview.citizens}</p>
+              <p className="text-xs text-slate-400">Citizens</p>
+            </div>
+            <div className="p-3 rounded-lg border border-slate-700 bg-slate-900/50">
+              <p className="text-lg font-bold">{platformAnalytics.data.overview.officers}</p>
+              <p className="text-xs text-slate-400">Officers</p>
+            </div>
+            <div className="p-3 rounded-lg border border-slate-700 bg-slate-900/50">
+              <p className="text-lg font-bold">{platformAnalytics.data.overview.admins}</p>
+              <p className="text-xs text-slate-400">Admins</p>
+            </div>
+            <div className="p-3 rounded-lg border border-slate-700 bg-slate-900/50">
+              <p className="text-lg font-bold">{platformAnalytics.data.overview.superAdmins}</p>
+              <p className="text-xs text-slate-400">Super Admins</p>
+            </div>
+            <div className="p-3 rounded-lg border border-slate-700 bg-slate-900/50">
+              <p className="text-lg font-bold text-amber-400">{platformAnalytics.data.overview.pendingInvitations}</p>
+              <p className="text-xs text-slate-400">Pending Invitations</p>
+            </div>
+            <div className="p-3 rounded-lg border border-slate-700 bg-slate-900/50">
+              <p className="text-lg font-bold text-red-400">{platformAnalytics.data.overview.quarantinedEvidence}</p>
+              <p className="text-xs text-slate-400">Quarantined</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Tab Navigation */}
+      <div className="section-card">
+        <div className="flex gap-2 flex-wrap">
+          <button
+            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+              activeTab === 'dashboard' 
+                ? 'bg-sky-500/20 text-sky-300 border border-sky-500/30' 
+                : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
+            }`}
+            onClick={() => setActiveTab('dashboard')}
+          >
+            <BarChart3 size={16} className="inline mr-2" />
+            Dashboard
+          </button>
+          <button
+            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+              activeTab === 'organizations' 
+                ? 'bg-sky-500/20 text-sky-300 border border-sky-500/30' 
+                : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
+            }`}
+            onClick={() => setActiveTab('organizations')}
+          >
+            <Building2 size={16} className="inline mr-2" />
+            Organizations
+          </button>
+          <button
+            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+              activeTab === 'administrators' 
+                ? 'bg-sky-500/20 text-sky-300 border border-sky-500/30' 
+                : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
+            }`}
+            onClick={() => setActiveTab('administrators')}
+          >
+            <Users size={16} className="inline mr-2" />
+            Administrators
+          </button>
+          <button
+            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+              activeTab === 'invitations' 
+                ? 'bg-sky-500/20 text-sky-300 border border-sky-500/30' 
+                : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
+            }`}
+            onClick={() => setActiveTab('invitations')}
+          >
+            <Mail size={16} className="inline mr-2" />
+            Invitations
+          </button>
+          <button
+            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+              activeTab === 'security' 
+                ? 'bg-sky-500/20 text-sky-300 border border-sky-500/30' 
+                : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
+            }`}
+            onClick={() => setActiveTab('security')}
+          >
+            <Shield size={16} className="inline mr-2" />
+            Security
+          </button>
+        </div>
+      </div>
+
+      {/* Tab Content */}
+      {activeTab === 'dashboard' && (
+        <div className="section-card">
+          <h2 className="text-xl font-bold mb-4">Platform Activity</h2>
+          {platformAnalytics.data?.recentSecurityEvents?.length > 0 ? (
+            <div className="space-y-2">
+              {platformAnalytics.data.recentSecurityEvents.map((event, index) => (
+                <div key={index} className="p-3 rounded-lg border border-slate-700 bg-slate-900/50">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-medium">{event.action}</span>
+                    <span className="text-xs text-slate-400">
+                      {new Date(event.createdAt).toLocaleString()}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm text-slate-400">No recent security events recorded.</p>
+          )}
+        </div>
+      )}
 
       {/* Stats Overview */}
       <div className="grid gap-4 md:grid-cols-4">
@@ -393,6 +564,18 @@ export default function SuperAdminDashboard() {
       {showInviteForm && (
         <div className="section-card">
           <h2 className="mb-4 text-xl font-bold">Invite Organization Administrator</h2>
+          
+          {/* SMTP Configuration Notice */}
+          <div className="mb-4 p-3 rounded-lg border border-amber-500/30 bg-amber-950/20">
+            <p className="text-sm text-amber-300">
+              <Mail size={14} className="inline mr-2" />
+              SMTP must be configured in backend .env for real email delivery
+            </p>
+            <p className="text-xs text-slate-400 mt-1">
+              Required: SMTP_USER, SMTP_PASSWORD, SMTP_HOST
+            </p>
+          </div>
+
           <form onSubmit={handleInviteAdmin} className="grid gap-4 max-w-2xl">
             <div>
               <label className="label">Select Organization</label>

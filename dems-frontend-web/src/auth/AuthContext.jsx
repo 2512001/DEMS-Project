@@ -4,6 +4,7 @@ import React, {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState
 } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
@@ -30,8 +31,11 @@ export function AuthProvider({ children }) {
   const [chainId, setChainId] = useState(null);
   const [authStatus, setAuthStatus] = useState('idle');
   const [authError, setAuthError] = useState('');
+  const tokenRef = useRef(token);
+  tokenRef.current = token;
 
   const logout = useCallback(() => {
+    tokenRef.current = '';
     setToken('');
     setUser(null);
     setWalletAddress('');
@@ -40,8 +44,11 @@ export function AuthProvider({ children }) {
   }, [queryClient]);
 
   useEffect(() => {
-    installAuthInterceptors(() => token, logout);
-  }, [token, logout]);
+    installAuthInterceptors(
+      () => tokenRef.current || readSavedAuth()?.token || '',
+      logout
+    );
+  }, [logout]);
 
   useEffect(() => {
     if (!token || !user) return;
@@ -64,7 +71,8 @@ export function AuthProvider({ children }) {
     const handleAccountsChanged = (accounts) => {
       const nextAccount = accounts?.[0]?.toLowerCase() || '';
       setWalletAddress(nextAccount);
-      if (!nextAccount || (user?.walletAddress && nextAccount !== user.walletAddress.toLowerCase())) {
+      const sessionWallet = user?.walletAddress?.toLowerCase();
+      if (sessionWallet && nextAccount && nextAccount !== sessionWallet) {
         logout();
       }
     };
@@ -82,27 +90,61 @@ export function AuthProvider({ children }) {
   useEffect(() => {
     if (!token) return;
     getMe()
-      .then((freshUser) => setUser(freshUser))
-      .catch(() => logout());
+      .then((freshUser) => {
+        if (!freshUser) return;
+        console.log('[AUTH] /me response - role:', freshUser.role, 'organizationId:', freshUser.organizationId);
+        setUser(freshUser);
+      })
+      .catch((error) => {
+        console.error('[AUTH] /me failed:', error);
+        if (error.response?.status === 401) {
+          logout();
+        }
+      });
   }, [token, logout]);
 
   const loginWithWallet = useCallback(async () => {
     setAuthStatus('connecting');
     setAuthError('');
     try {
+      console.log('[AUTH] Step 1: Ensure required network');
       await ensureRequiredNetwork();
+      console.log('[AUTH] Step 2: Connect MetaMask');
       const signer = await connectMetaMask();
       const address = (await signer.getAddress()).toLowerCase();
+      console.log('[AUTH] Step 3: Request nonce for', address);
+      
       const nonce = await requestNonce(address);
+      console.log('[AUTH] Step 4: Got nonce, requesting signature');
+      
       const signature = await signer.signMessage(nonce.message);
+      console.log('[AUTH] Step 5: Got signature, verifying with backend');
+      
       const verified = await verifySignature({ walletAddress: address, signature });
+      console.log('[AUTH] Step 6: Verification result:', verified);
+      
+      if (!verified || !verified.token || !verified.user) {
+        throw new Error('Authentication failed: Invalid response from server');
+      }
+      
+      console.log('[AUTH] Step 7: Setting auth state immediately');
+      
+      const authData = { token: verified.token, user: verified.user };
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(authData));
+      tokenRef.current = verified.token;
       setToken(verified.token);
       setUser(verified.user);
       setWalletAddress(verified.user.walletAddress);
       setChainId(REQUIRED_CHAIN_HEX);
       setAuthStatus('authenticated');
+      
+      console.log('[AUTH] Step 8: Authentication complete, role:', verified.user.role);
+      console.log('[AUTH] Final auth state - token:', !!verified.token, 'user:', !!verified.user, 'role:', verified.user.role);
+      
+      // Return immediately after setting state
       return verified;
     } catch (error) {
+      console.error('[AUTH] Authentication error:', error);
       setAuthStatus('error');
       setAuthError(error.message || 'Wallet authentication failed.');
       throw error;
@@ -125,6 +167,7 @@ export function AuthProvider({ children }) {
     isSepolia: chainId === REQUIRED_CHAIN_HEX ,
     authStatus,
     authError,
+    setAuthError,
     loginWithWallet,
     logout,
     refreshUser,

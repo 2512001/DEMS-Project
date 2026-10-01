@@ -2,6 +2,15 @@ import React from 'react';
 import { BadgeCheck, Shield, ShieldCheck, Crown } from 'lucide-react';
 
 const ROLE_CONFIG = {
+  super_admin: {
+    icon: Crown,
+    gradient: 'from-amber-500/20 to-amber-600/10',
+    border: 'border-amber-500/30',
+    text: 'text-amber-300',
+    iconBg: 'bg-amber-500/20',
+    iconColor: 'text-amber-400',
+    label: 'Super Admin'
+  },
   admin: {
     icon: ShieldCheck,
     gradient: 'from-emerald-500/20 to-emerald-600/10',

@@ -74,9 +74,45 @@ export default function UploadEvidence() {
       setTxHash('');
       setError('');
       setStage('collect');
-      navigate('/citizen/evidence-vault');
+      navigate(isEmployee ? '/officer/dashboard' : '/citizen/evidence-vault');
     }, 1800);
   };
+
+  const chainMutation = useMutation({
+    mutationFn: async (stored) => {
+      const record = stored || uploadResult;
+      const payload = record?.blockchainPayload;
+      const evidenceId = record?.evidenceId;
+      if (!payload || !evidenceId) {
+        throw new Error('Blockchain payload is missing from the backend response.');
+      }
+      if (!window.ethereum) {
+        throw new Error('MetaMask is not installed.');
+      }
+      if (!EVIDENCE_CONTRACT_ADDRESS) {
+        throw new Error('Evidence contract address is not configured.');
+      }
+      setStage('chain');
+      const chain = await addEvidenceOnChain(payload);
+      setTxHash(chain.txHash);
+      setStage('finalize');
+      return finalizeEvidence(evidenceId, chain.txHash);
+    },
+    onSuccess: (response) => {
+      if (response?.data) setUploadResult(response.data);
+      setStage('complete');
+      resetAfterSuccess();
+    },
+    onError: async (err, stored) => {
+      const message = err?.response?.data?.message || err.message || 'Blockchain proof could not be created. Your evidence remains stored in IPFS.';
+      setError(message);
+      const evidenceId = stored?.evidenceId || uploadResult?.evidenceId;
+      if (evidenceId) {
+        await markBlockchainFailed(evidenceId, message).catch(() => {});
+      }
+      setStage('ai');
+    }
+  });
 
   const uploadMutation = useMutation({
     mutationFn: uploadEvidence,
@@ -97,45 +133,18 @@ export default function UploadEvidence() {
       }
       setUploadResult(response.data);
       setAiPreview(response.data?.aiAnalysis || null);
-      setStage(response.data?.blockchainPayload ? 'ai' : 'complete');
       queryClient.invalidateQueries({ queryKey: ['my-files'] });
-      if (!response.data?.blockchainPayload) resetAfterSuccess();
+      if (response.data?.blockchainPayload) {
+        setStage('chain');
+        chainMutation.mutate(response.data);
+      } else {
+        setStage('complete');
+        resetAfterSuccess();
+      }
     },
     onError: (err) => {
       setError(err?.response?.data?.message || err.message || 'Upload failed.');
       setStage('collect');
-    }
-  });
-
-  const chainMutation = useMutation({
-    mutationFn: async () => {
-      if (!uploadResult?.blockchainPayload) {
-        throw new Error('Blockchain payload is missing from the backend response.');
-      }
-      if (!window.ethereum) {
-        throw new Error('MetaMask is not installed.');
-      }
-      if (!EVIDENCE_CONTRACT_ADDRESS) {
-        throw new Error('Evidence contract address is not configured.');
-      }
-      setStage('chain');
-      const chain = await addEvidenceOnChain(uploadResult.blockchainPayload);
-      setTxHash(chain.txHash);
-      setStage('finalize');
-      return finalizeEvidence(uploadResult.evidenceId, chain.txHash);
-    },
-    onSuccess: (response) => {
-      if (response?.data) setUploadResult(response.data);
-      setStage('complete');
-      resetAfterSuccess();
-    },
-    onError: async (err) => {
-      const message = err?.response?.data?.message || err.message || 'Blockchain proof could not be created. Your evidence remains stored in IPFS.';
-      setError(message);
-      if (uploadResult?.evidenceId) {
-        await markBlockchainFailed(uploadResult.evidenceId, message).catch(() => {});
-      }
-      setStage('ai');
     }
   });
 
@@ -321,7 +330,7 @@ export default function UploadEvidence() {
             {uploadResult.ipfsCID ? <div><p className="label">IPFS CID</p><HashValue value={uploadResult.ipfsCID} compact={false} /></div> : null}
             {txHash ? <div><p className="label">Tx Hash</p><HashValue value={txHash} compact={false} /></div> : null}
             {uploadResult.blockchainPayload && !txHash ? (
-              <button type="button" className="btn-primary w-full" onClick={() => chainMutation.mutate()} disabled={chainMutation.isPending || !EVIDENCE_CONTRACT_ADDRESS}>
+              <button type="button" className="btn-primary w-full" onClick={() => chainMutation.mutate(uploadResult)} disabled={chainMutation.isPending || !EVIDENCE_CONTRACT_ADDRESS}>
                 {chainMutation.isPending ? <Loader2 className="animate-spin" size={16} /> : <ShieldCheck size={16} />}
                 Confirm With MetaMask
               </button>

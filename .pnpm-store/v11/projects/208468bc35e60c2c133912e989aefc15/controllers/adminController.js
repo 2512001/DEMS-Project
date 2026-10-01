@@ -223,6 +223,10 @@ const reviewVerificationRequest = async (req, res, next) => {
         if (status === 'approved') {
             updates.role = 'officer';
             updates.organizationId = req.user.organizationId;
+            updates.membershipStatus = 'active';
+        } else {
+            updates.membershipStatus = 'rejected';
+            updates.organizationId = null;
         }
 
         const user = await User.findOneAndUpdate(
@@ -269,7 +273,7 @@ const reviewMembershipApplication = async (req, res, next) => {
             return res.status(400).json({ success: false, message: 'Valid user ID and status approved/rejected are required.' });
         }
 
-        const existing = await User.findById(userId).select(`${publicUserFields} membershipStatus membershipReviewedBy membershipReviewedAt membershipRejectionReason profile organizationId`);
+        const existing = await User.findById(userId).select(`${publicUserFields} membershipStatus membershipReviewedBy membershipReviewedAt membershipRejectionReason profile organizationId officerVerification`);
         if (!existing) {
             return res.status(404).json({ success: false, message: 'User not found.' });
         }
@@ -278,7 +282,8 @@ const reviewMembershipApplication = async (req, res, next) => {
             return res.status(409).json({ success: false, message: 'This application is not pending review.' });
         }
 
-        if (String(existing.organizationId) !== String(req.user.organizationId)) {
+        const requestedOrg = existing.organizationId || existing.officerVerification?.requestedOrganizationId;
+        if (String(requestedOrg || '') !== String(req.user.organizationId)) {
             return res.status(403).json({ success: false, message: 'You are not authorized to review this application.' });
         }
 
@@ -296,6 +301,9 @@ const reviewMembershipApplication = async (req, res, next) => {
         if (status === 'approved') {
             updates.role = 'officer';
             updates.organizationId = req.user.organizationId;
+        } else {
+            updates.organizationId = null;
+            updates.role = existing.role === 'officer' ? 'citizen' : existing.role;
         }
 
         const user = await User.findByIdAndUpdate(
@@ -311,16 +319,18 @@ const reviewMembershipApplication = async (req, res, next) => {
         const organization = await Organization.findById(req.user.organizationId);
         if (organization) {
             if (status === 'approved') {
-                await sendEmployeeApprovedEmail(
+                const emailResult = await sendEmployeeApprovedEmail(
                     { invitedName: user.profile?.displayName || existing.profile?.displayName, invitedEmail: user.profile?.email || existing.profile?.email },
                     organization
                 );
+                console.log('[ADMIN] Approval email status:', emailResult.status);
             } else {
-                await sendEmployeeRejectedEmail(
+                const emailResult = await sendEmployeeRejectedEmail(
                     { invitedName: user.profile?.displayName || existing.profile?.displayName, invitedEmail: user.profile?.email || existing.profile?.email },
                     organization,
                     rejectionReason
                 );
+                console.log('[ADMIN] Rejection email status:', emailResult.status);
             }
         }
 

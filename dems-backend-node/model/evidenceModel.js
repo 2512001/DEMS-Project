@@ -8,11 +8,24 @@ const evidenceSchema = new Schema({
         required: true,
         index: true
     },
+    uploadedBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User',
+        required: true,
+        index: true,
+        default: function () {
+            return this.user;
+        }
+    },
     organizationId: {
         type: Schema.Types.ObjectId,
         ref: 'Organization',
         default: null,
         index: true
+    },
+    department: {
+        type: String,
+        default: null
     },
     UploaderWallet: {
         type: String,
@@ -122,6 +135,15 @@ const evidenceSchema = new Schema({
         type: Schema.Types.ObjectId,
         ref: 'QuarantineEvidence',
         default: null
+    },
+    quarantineStatus: {
+        type: String,
+        enum: ['none', 'pending', 'quarantined', 'approved', 'rejected'],
+        default: 'none'
+    },
+    integrityVerified: {
+        type: Boolean,
+        default: false
     },
     status: {
         type: String,

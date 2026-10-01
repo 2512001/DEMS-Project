@@ -22,7 +22,7 @@ export async function getOrganizationEvidence() {
 
 export async function uploadEvidence(formData) {
   const { data } = await apiClient.post('/evidence/upload', formData, {
-    headers: { 'Content-Type': 'multipart/form-data' }
+    timeout: 120000
   });
   return data;
 }

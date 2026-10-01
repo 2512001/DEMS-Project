@@ -17,7 +17,7 @@ export async function acceptEmployeeInvitation(token) {
 
 export async function submitEmployeeApplication(token, formData) {
   const { data } = await apiClient.post(`/invitations/employee/${token}/submit`, formData, {
-    headers: { 'Content-Type': 'multipart/form-data' }
+    timeout: 120000
   });
   return data;
 }

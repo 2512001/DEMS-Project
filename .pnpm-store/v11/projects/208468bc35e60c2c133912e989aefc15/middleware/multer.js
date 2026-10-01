@@ -9,13 +9,16 @@ if (!fs.existsSync(uploadDir)) {
 
 const allowedMimeTypes = new Set([
     'image/jpeg',
+    'image/jpg',
     'image/png',
     'image/webp',
     'image/gif',
     'video/mp4',
     'video/webm',
+    'video/quicktime',
     'audio/mpeg',
     'audio/wav',
+    'audio/x-wav',
     'application/pdf'
 ]);
 

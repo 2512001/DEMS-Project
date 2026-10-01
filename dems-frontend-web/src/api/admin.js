@@ -2,7 +2,7 @@ import { apiClient } from './client.js';
 
 export async function submitVerificationRequest(formData) {
   const { data } = await apiClient.post('/admin/verification-request', formData, {
-    headers: { 'Content-Type': 'multipart/form-data' }
+    timeout: 120000
   });
   return data;
 }

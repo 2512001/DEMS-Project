@@ -7,8 +7,9 @@ dotenv.config();
 const PRIVATE_KEY = process.env.PRIVATE_KEY ?? "";
 const accounts = PRIVATE_KEY ? [PRIVATE_KEY] : [];
 
-console.log(process.env.PRIVATE_KEY);
-console.log("LENGTH =", PRIVATE_KEY.length);
+if (PRIVATE_KEY) {
+  console.log("Hardhat signer key configured, length =", PRIVATE_KEY.length);
+}
 
 
 const config: HardhatUserConfig = {

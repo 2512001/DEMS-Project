@@ -26,6 +26,8 @@ const protect = async (req, res, next) => {
             return res.status(403).json({ success: false, message: 'This account is suspended.' });
         }
 
+        console.log('[AUTH] Protected route - User role:', user.role, 'organizationId:', user.organizationId);
+
         req.user = {
             id: user._id.toString(),
             role: user.role,

@@ -4,6 +4,7 @@ const QuarantineEvidence = require('../model/quarantineEvidenceModel');
 const { decryptFile } = require('../services/cryptoService');
 const { fetchEncryptedBlobFromIpfs } = require('../services/ipfsService');
 const { processEvidenceUpload, blockchainPayload } = require('../services/evidencePipelineService');
+const { getOnChainEvidence, evidenceExists } = require('../services/blockchainService');
 const { canAccessEvidence, isAdmin, isEmployee, isEvidenceOwner, httpError } = require('../services/accessControl');
 const { writeAuditLog } = require('../services/auditService');
 const { getOrganizationPolicy } = require('../services/organizationService');
@@ -30,11 +31,18 @@ const uploadEvidence = async (req, res, next) => {
         }
 
         const fileBuffer = getFileBuffer(req.file);
+        const uploadBody = { ...req.body };
+        
+        // Make caseId optional - allow uploads without caseId
+        if (!uploadBody.caseId) {
+            uploadBody.caseId = null;
+        }
+        
         const result = await processEvidenceUpload({
             user: req.user,
             file: req.file,
             fileBuffer,
-            body: req.body
+            body: uploadBody
         });
 
         return res.status(result.requiresConfirmation ? 200 : 201).json({
@@ -229,8 +237,9 @@ const finalizeEvidence = async (req, res, next) => {
     try {
         const evidenceId = String(req.params.evidenceId || '').trim();
         const txHash = String(req.body.txHash || '').trim();
+        const alreadyRegistered = Boolean(req.body.alreadyRegistered);
 
-        if (!txHash.startsWith('0x') || txHash.length !== 66) {
+        if (!alreadyRegistered && (!txHash.startsWith('0x') || txHash.length !== 66)) {
             return res.status(400).json({ success: false, message: 'Valid blockchain transaction hash is required.' });
         }
 
@@ -242,15 +251,37 @@ const finalizeEvidence = async (req, res, next) => {
         if (!isEvidenceOwner(req.user, evidence)) {
             return res.status(403).json({ success: false, message: 'Only the original uploader wallet can finalize the blockchain proof.' });
         }
-        if (!evidence.blockchainRequested || !['pending', 'failed'].includes(evidence.blockchainStatus)) {
+        if (!evidence.blockchainRequested || !['pending', 'failed', 'confirmed'].includes(evidence.blockchainStatus)) {
             return res.status(409).json({ success: false, message: 'This evidence is not waiting for a blockchain proof.' });
         }
 
-        evidence.blockchainTxHash = txHash;
+        const exists = await evidenceExists(evidence._id.toString());
+        if (!exists) {
+            return res.status(409).json({
+                success: false,
+                message: 'The blockchain transaction was not found as a registered EvidenceRegistry record. The evidence remains stored on IPFS only.'
+            });
+        }
+
+        const onChain = await getOnChainEvidence(evidence._id.toString());
+        const hashMatches = String(onChain.fileHash || '').toLowerCase() === String(evidence.fileHash || '').toLowerCase();
+        const cidMatches = String(onChain.ipfsCID || '').trim() === String(evidence.ipfsCID || '').trim();
+        if (!hashMatches || !cidMatches) {
+            return res.status(409).json({
+                success: false,
+                message: 'On-chain evidence does not match the MongoDB file hash or IPFS CID. Blockchain status was not marked confirmed.'
+            });
+        }
+
+        if (txHash.startsWith('0x') && txHash.length === 66) {
+            evidence.blockchainTxHash = txHash;
+        }
         evidence.blockchainRequested = true;
         evidence.blockchainStatus = 'confirmed';
         evidence.status = 'stored_on_chain';
-        evidence.statusMessage = 'Blockchain transaction confirmed and stored.';
+        evidence.statusMessage = alreadyRegistered
+            ? 'Existing on-chain evidence record verified and stored.'
+            : 'Blockchain transaction confirmed and stored.';
         await evidence.save();
 
         await writeAuditLog({

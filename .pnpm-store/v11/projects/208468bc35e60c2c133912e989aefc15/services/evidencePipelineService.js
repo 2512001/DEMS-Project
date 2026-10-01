@@ -121,6 +121,7 @@ async function createTrustedEvidence({
 
     const evidence = await EvidenceModel.create({
         user: user.id,
+        uploadedBy: user.id,
         organizationId: user.organizationId || null,
         UploaderWallet: String(user.walletAddress).toLowerCase(),
         caseId,

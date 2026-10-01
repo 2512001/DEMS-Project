@@ -1,15 +1,15 @@
-import React from 'react';
 import { ethers } from 'ethers';
 
 export const SEPOLIA_CHAIN_ID = 11155111;
 export const SEPOLIA_CHAIN_HEX = '0xaa36a7';
 
 export const REQUIRED_CHAIN_ID = Number(
-  import.meta.env.VITE_REQUIRED_CHAIN_ID || 31337
+  import.meta.env.VITE_REQUIRED_CHAIN_ID || import.meta.env.VITE_CHAIN_ID || 31337
 );
 
-export const REQUIRED_CHAIN_HEX =
-  `0x${REQUIRED_CHAIN_ID.toString(16)}`;
+export const REQUIRED_CHAIN_HEX = `0x${REQUIRED_CHAIN_ID.toString(16)}`;
+
+const LOCAL_RPC_URLS = ['http://127.0.0.1:8545', 'http://localhost:8545'];
 
 export function hasMetaMask() {
   return Boolean(window.ethereum);
@@ -28,64 +28,89 @@ export async function connectMetaMask() {
   return provider.getSigner();
 }
 
+function localNetworkParams(chainHex) {
+  return {
+    chainId: chainHex,
+    chainName: 'Hardhat Local',
+    nativeCurrency: {
+      name: 'ETH',
+      symbol: 'ETH',
+      decimals: 18
+    },
+    rpcUrls: LOCAL_RPC_URLS
+  };
+}
+
+function sepoliaNetworkParams() {
+  return {
+    chainId: SEPOLIA_CHAIN_HEX,
+    chainName: 'Sepolia Testnet',
+    nativeCurrency: {
+      name: 'Sepolia ETH',
+      symbol: 'ETH',
+      decimals: 18
+    },
+    rpcUrls: ['https://rpc.sepolia.org'],
+    blockExplorerUrls: ['https://sepolia.etherscan.io']
+  };
+}
+
+async function currentChainId() {
+  return String(
+    await window.ethereum.request({ method: 'eth_chainId' })
+  ).toLowerCase();
+}
+
 export async function ensureRequiredNetwork() {
   if (!hasMetaMask()) {
     throw new Error('MetaMask is required.');
   }
 
-  const REQUIRED_CHAIN_ID = Number(
-    import.meta.env.VITE_REQUIRED_CHAIN_ID || 31337
-  );
+  const requiredHex = REQUIRED_CHAIN_HEX.toLowerCase();
+  const current = await currentChainId();
 
-  const REQUIRED_CHAIN_HEX =
-    `0x${REQUIRED_CHAIN_ID.toString(16)}`;
-
-  const currentChainId = await window.ethereum.request({
-    method: 'eth_chainId'
-  });
-
-  if (currentChainId === REQUIRED_CHAIN_HEX) return;
+  if (current === requiredHex) {
+    return;
+  }
 
   try {
     await window.ethereum.request({
       method: 'wallet_switchEthereumChain',
-      params: [{ chainId: REQUIRED_CHAIN_HEX }]
+      params: [{ chainId: requiredHex }]
     });
   } catch (error) {
+    if (error.code === 4902) {
+      const params = REQUIRED_CHAIN_ID === 31337
+        ? localNetworkParams(requiredHex)
+        : sepoliaNetworkParams();
 
-    if (error.code !== 4902) throw error;
-
-    if (REQUIRED_CHAIN_ID === 31337) {
       await window.ethereum.request({
         method: 'wallet_addEthereumChain',
-        params: [{
-          chainId: '0x7a69',
-          chainName: 'Hardhat Local',
-          nativeCurrency: {
-            name: 'ETH',
-            symbol: 'ETH',
-            decimals: 18
-          },
-          rpcUrls: ['http://127.0.0.1:8545']
-        }]
+        params: [params]
       });
-      return;
-    }
 
-    await window.ethereum.request({
-      method: 'wallet_addEthereumChain',
-      params: [{
-        chainId: '0xaa36a7',
-        chainName: 'Sepolia Testnet',
-        nativeCurrency: {
-          name: 'Sepolia ETH',
-          symbol: 'ETH',
-          decimals: 18
-        },
-        rpcUrls: ['https://rpc.sepolia.org'],
-        blockExplorerUrls: ['https://sepolia.etherscan.io']
-      }]
-    });
+      try {
+        await window.ethereum.request({
+          method: 'wallet_switchEthereumChain',
+          params: [{ chainId: requiredHex }]
+        });
+      } catch {
+        // addEthereumChain often already switches
+      }
+    } else if (error.code === 4001) {
+      throw new Error(`Switch MetaMask to chain ${REQUIRED_CHAIN_ID} to continue.`);
+    } else {
+      throw new Error(
+        `Failed to switch network: ${error.message}. Switch MetaMask to chain ${REQUIRED_CHAIN_ID} (${requiredHex}).`
+      );
+    }
+  }
+
+  const after = await currentChainId();
+  if (after !== requiredHex) {
+    throw new Error(
+      `MetaMask is still on ${after}. Switch to Hardhat Local (chain ${REQUIRED_CHAIN_ID}) and try again.`
+    );
   }
 }
 

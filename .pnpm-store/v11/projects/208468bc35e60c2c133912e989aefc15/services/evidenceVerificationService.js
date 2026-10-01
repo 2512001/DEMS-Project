@@ -25,7 +25,7 @@ function buildMismatch(field, expected, actual) {
     return { field, expected, actual };
 }
 
-function buildCheck({ field, label, mongodb = null, ipfs = null, blockchain = null, matched }) {
+function buildCheck({ field, label, mongodb = null, ipfs = null, blockchain = null, matched, status }) {
     return {
         field,
         label,
@@ -33,7 +33,7 @@ function buildCheck({ field, label, mongodb = null, ipfs = null, blockchain = nu
         ipfs,
         blockchain,
         matched: Boolean(matched),
-        status: matched ? 'MATCH' : 'MISMATCH'
+        status: status || (matched ? 'MATCH' : 'MISMATCH')
     };
 }
 
@@ -51,9 +51,19 @@ function assertCanVerify(evidence, requester) {
     }
 }
 
+function isAvailabilityError(error) {
+    return [
+        'CONTRACT_NOT_DEPLOYED',
+        'CONTRACT_CALL_FAILED',
+        'CONTRACT_NOT_CONFIGURED',
+        'RPC_NOT_CONFIGURED',
+        'RPC_UNAVAILABLE'
+    ].includes(error?.code);
+}
+
 async function verifyEvidenceIntegrity(evidenceId, requester) {
     const evidence = await EvidenceModel.findById(evidenceId).select(
-        '_id user organizationId fileHash ipfsCID UploaderWallet blockchainTxHash encryption createdAt status blockchainStatus'
+        '_id user organizationId fileHash ipfsCID UploaderWallet blockchainTxHash blockchainStatus blockchainRequested encryption createdAt status'
     );
 
     if (!evidence) {
@@ -64,47 +74,73 @@ async function verifyEvidenceIntegrity(evidenceId, requester) {
 
     assertCanVerify(evidence, requester);
 
-    if (!evidence.ipfsCID) {
-        const error = new Error('Evidence does not have an IPFS CID.');
-        error.statusCode = 422;
-        throw error;
-    }
-
-    if (!evidence.encryption?.iv || !evidence.encryption?.authTag) {
-        const error = new Error('Evidence encryption metadata is missing.');
-        error.statusCode = 422;
-        throw error;
-    }
-
-    const encryptedBuffer = await fetchEncryptedBlobFromIpfs(evidence.ipfsCID);
+    const stages = {
+        mongodb: { available: true, detail: 'Evidence metadata loaded from MongoDB.' },
+        ipfs: { available: false, detail: 'IPFS was not checked.' },
+        blockchain: { available: false, detail: 'Blockchain was not checked.' }
+    };
 
     let generatedHash = null;
-    try {
-        const decryptedBuffer = decryptFile(encryptedBuffer, evidence.encryption);
-        generatedHash = computeSha256(decryptedBuffer);
-    } catch {
-        generatedHash = null;
+    if (!evidence.ipfsCID) {
+        stages.ipfs = { available: false, detail: 'Evidence does not have an IPFS CID.' };
+    } else if (!evidence.encryption?.iv || !evidence.encryption?.authTag) {
+        stages.ipfs = { available: false, detail: 'Evidence encryption metadata is missing.' };
+    } else {
+        try {
+            const encryptedBuffer = await fetchEncryptedBlobFromIpfs(evidence.ipfsCID);
+            try {
+                const decryptedBuffer = decryptFile(encryptedBuffer, evidence.encryption);
+                generatedHash = computeSha256(decryptedBuffer);
+                stages.ipfs = { available: true, detail: 'IPFS content was retrieved and decrypted.' };
+            } catch {
+                stages.ipfs = { available: true, detail: 'IPFS content was retrieved but could not be decrypted with stored keys.' };
+            }
+        } catch (error) {
+            stages.ipfs = { available: false, detail: error.message || 'IPFS content could not be retrieved.' };
+        }
     }
 
-    const onChain = await getOnChainEvidence(evidence._id.toString());
+    let onChain = null;
+    const chainRequested = Boolean(evidence.blockchainRequested) || evidence.blockchainStatus === 'confirmed' || Boolean(evidence.blockchainTxHash);
+
+    if (!chainRequested) {
+        stages.blockchain = { available: false, detail: 'Blockchain registration was not requested for this evidence.' };
+    } else {
+        try {
+            onChain = await getOnChainEvidence(evidence._id.toString());
+            stages.blockchain = { available: true, detail: 'On-chain evidence record was read.' };
+        } catch (error) {
+            if (error.code === 'EVIDENCE_NOT_ON_CHAIN') {
+                stages.blockchain = { available: false, detail: 'Evidence is not registered on the configured contract.' };
+            } else if (isAvailabilityError(error)) {
+                stages.blockchain = { available: false, detail: error.message };
+            } else {
+                stages.blockchain = { available: false, detail: error.message || 'Blockchain lookup failed.' };
+            }
+        }
+    }
 
     const mongoFileHash = normalizeHash(evidence.fileHash);
     const mongoIpfsCID = String(evidence.ipfsCID || '').trim();
     const mongoUploader = normalizeWallet(evidence.UploaderWallet);
     const mongoEvidenceId = normalizeId(evidence._id);
-    const chainFileHash = normalizeHash(onChain.fileHash);
-    const chainIpfsCID = String(onChain.ipfsCID || '').trim();
-    const chainUploader = normalizeWallet(onChain.uploadedBy);
-    const chainEvidenceId = normalizeId(onChain.evidenceId);
+    const chainFileHash = normalizeHash(onChain?.fileHash);
+    const chainIpfsCID = String(onChain?.ipfsCID || '').trim();
+    const chainUploader = normalizeWallet(onChain?.uploadedBy);
+    const chainEvidenceId = normalizeId(onChain?.evidenceId);
     const ipfsContentHash = normalizeHash(generatedHash);
 
     const mongoEqualsIpfs = Boolean(mongoFileHash && ipfsContentHash && mongoFileHash === ipfsContentHash);
-    const mongoEqualsChain = Boolean(mongoFileHash && chainFileHash && mongoFileHash === chainFileHash);
-    const ipfsEqualsChain = Boolean(ipfsContentHash && chainFileHash && ipfsContentHash === chainFileHash);
-    const hashesAligned = mongoEqualsIpfs && mongoEqualsChain && ipfsEqualsChain;
-    const cidMatched = cidEquals(mongoIpfsCID, chainIpfsCID);
-    const uploaderMatched = Boolean(mongoUploader && chainUploader && mongoUploader === chainUploader);
-    const evidenceIdMatched = Boolean(mongoEvidenceId && chainEvidenceId && mongoEvidenceId === chainEvidenceId);
+    const mongoEqualsChain = Boolean(onChain && mongoFileHash && chainFileHash && mongoFileHash === chainFileHash);
+    const ipfsEqualsChain = Boolean(onChain && ipfsContentHash && chainFileHash && ipfsContentHash === chainFileHash);
+    const hashesAligned = stages.ipfs.available && stages.blockchain.available
+        ? (mongoEqualsIpfs && mongoEqualsChain && ipfsEqualsChain)
+        : false;
+    const cidMatched = Boolean(onChain && cidEquals(mongoIpfsCID, chainIpfsCID));
+    const uploaderMatched = Boolean(onChain && mongoUploader && chainUploader && mongoUploader === chainUploader);
+    const evidenceIdMatched = Boolean(onChain && mongoEvidenceId && chainEvidenceId && mongoEvidenceId === chainEvidenceId);
+
+    const incomplete = !stages.ipfs.available || (chainRequested && !stages.blockchain.available);
 
     const checks = [
         buildCheck({
@@ -112,46 +148,52 @@ async function verifyEvidenceIntegrity(evidenceId, requester) {
             label: 'MongoDB Hash',
             mongodb: evidence.fileHash,
             ipfs: generatedHash,
-            blockchain: onChain.fileHash,
-            matched: hashesAligned
+            blockchain: onChain?.fileHash || null,
+            matched: incomplete ? false : hashesAligned,
+            status: !stages.ipfs.available || (chainRequested && !stages.blockchain.available) ? 'INCOMPLETE' : (hashesAligned ? 'MATCH' : 'MISMATCH')
         }),
         buildCheck({
             field: 'ipfsContentHash',
             label: 'IPFS Content Hash',
             mongodb: evidence.fileHash,
             ipfs: generatedHash,
-            blockchain: onChain.fileHash,
-            matched: hashesAligned
+            blockchain: onChain?.fileHash || null,
+            matched: incomplete ? false : hashesAligned,
+            status: !stages.ipfs.available ? 'INCOMPLETE' : (hashesAligned ? 'MATCH' : 'MISMATCH')
         }),
         buildCheck({
             field: 'blockchainHash',
             label: 'Blockchain Hash',
             mongodb: evidence.fileHash,
             ipfs: generatedHash,
-            blockchain: onChain.fileHash,
-            matched: hashesAligned
+            blockchain: onChain?.fileHash || null,
+            matched: incomplete ? false : hashesAligned,
+            status: chainRequested && !stages.blockchain.available ? 'INCOMPLETE' : (!chainRequested ? 'NOT_REQUESTED' : (hashesAligned ? 'MATCH' : 'MISMATCH'))
         }),
         buildCheck({
             field: 'ipfsCID',
             label: 'IPFS CID',
             mongodb: evidence.ipfsCID,
             ipfs: evidence.ipfsCID,
-            blockchain: onChain.ipfsCID,
-            matched: cidMatched
+            blockchain: onChain?.ipfsCID || null,
+            matched: cidMatched,
+            status: !stages.blockchain.available && chainRequested ? 'INCOMPLETE' : (cidMatched ? 'MATCH' : 'MISMATCH')
         }),
         buildCheck({
             field: 'uploadedBy',
             label: 'Uploader',
             mongodb: evidence.UploaderWallet,
-            blockchain: onChain.uploadedBy,
-            matched: uploaderMatched
+            blockchain: onChain?.uploadedBy || null,
+            matched: uploaderMatched,
+            status: !stages.blockchain.available && chainRequested ? 'INCOMPLETE' : (uploaderMatched ? 'MATCH' : 'MISMATCH')
         }),
         buildCheck({
             field: 'evidenceId',
             label: 'Evidence ID',
             mongodb: evidence._id.toString(),
-            blockchain: onChain.evidenceId,
-            matched: evidenceIdMatched
+            blockchain: onChain?.evidenceId || null,
+            matched: evidenceIdMatched,
+            status: !stages.blockchain.available && chainRequested ? 'INCOMPLETE' : (evidenceIdMatched ? 'MATCH' : 'MISMATCH')
         })
     ];
 
@@ -163,29 +205,48 @@ async function verifyEvidenceIntegrity(evidenceId, requester) {
         evidenceIdMatched,
         mongoHashMatched: mongoEqualsIpfs,
         hashesAligned,
-        proofPresent: Boolean(evidence.blockchainTxHash) || Boolean(onChain.uploadedAt)
+        proofPresent: Boolean(onChain),
+        stages
     };
 
     const mismatches = checks
-        .filter((check) => !check.matched)
+        .filter((check) => check.status === 'MISMATCH')
         .map((check) => buildMismatch(
             check.field,
             check.blockchain,
             check.mongodb ?? check.ipfs
         ));
 
-    const allChecksPassed = hashesAligned && cidMatched && uploaderMatched && evidenceIdMatched;
-    const verificationStatus = allChecksPassed ? 'VERIFIED' : 'TAMPERED';
+    const allChecksPassed = !incomplete && hashesAligned && cidMatched && uploaderMatched && evidenceIdMatched;
+    let verificationStatus = 'INTEGRITY_MISMATCH';
+    let message = 'INTEGRITY FAILURE. Possible evidence mismatch detected.';
 
-    const blockchainData = {
-        evidenceId: onChain.evidenceId,
-        fileHash: onChain.fileHash,
-        ipfsCID: onChain.ipfsCID,
-        uploadedAt: onChain.uploadedAt,
-        uploadedBy: onChain.uploadedBy,
-        aiScore: onChain.aiScore,
-        transactionHash: evidence.blockchainTxHash || null
-    };
+    if (allChecksPassed) {
+        verificationStatus = 'VERIFIED';
+        message = 'INTEGRITY VERIFIED. MongoDB metadata, recovered IPFS content, and the blockchain proof match. No tampering detected.';
+    } else if (incomplete) {
+        verificationStatus = 'VERIFICATION_INCOMPLETE';
+        const failedStages = Object.entries(stages)
+            .filter(([, stage]) => !stage.available)
+            .map(([name, stage]) => `${name}: ${stage.detail}`)
+            .join(' ');
+        message = `Verification is incomplete. ${failedStages}`;
+    }
+
+    const blockchainData = onChain
+        ? {
+            evidenceId: onChain.evidenceId,
+            fileHash: onChain.fileHash,
+            ipfsCID: onChain.ipfsCID,
+            uploadedAt: onChain.uploadedAt,
+            uploadedBy: onChain.uploadedBy,
+            aiScore: onChain.aiScore,
+            transactionHash: evidence.blockchainTxHash || null
+        }
+        : null;
+
+    evidence.integrityVerified = allChecksPassed;
+    await evidence.save();
 
     await writeAuditLog({
         actor: requester,
@@ -193,8 +254,8 @@ async function verifyEvidenceIntegrity(evidenceId, requester) {
         action: 'integrity_verification',
         targetType: 'evidence',
         targetId: evidence._id,
-        result: allChecksPassed ? 'success' : 'mismatch',
-        metadata: { verificationStatus }
+        result: allChecksPassed ? 'success' : (incomplete ? 'incomplete' : 'mismatch'),
+        metadata: { verificationStatus, stages }
     });
 
     return {
@@ -212,16 +273,17 @@ async function verifyEvidenceIntegrity(evidenceId, requester) {
             },
             ipfs: {
                 cid: evidence.ipfsCID,
-                recoveredFileHash: generatedHash
+                recoveredFileHash: generatedHash,
+                available: stages.ipfs.available,
+                detail: stages.ipfs.detail
             },
             blockchain: blockchainData
         },
         checks,
         comparisons,
         mismatches,
-        message: allChecksPassed
-            ? 'INTEGRITY VERIFIED. MongoDB metadata, recovered IPFS content, and the blockchain proof match. No tampering detected.'
-            : 'INTEGRITY FAILURE. Possible evidence mismatch detected.'
+        stages,
+        message
     };
 }
 

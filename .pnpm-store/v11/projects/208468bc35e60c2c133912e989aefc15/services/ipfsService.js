@@ -14,12 +14,23 @@ async function uploadEncryptedBlobToPinata(encryptedBuffer, originalName) {
         return mockCID;
     }
 
-    const blob = new Blob([encryptedBuffer]);
-    const file = new File([blob], originalName, {
-        type: 'application/octet-stream'
-    });
-    const upload = await pinata.upload.public.file(file);
-    return upload.cid;
+    try {
+        const blob = new Blob([encryptedBuffer]);
+        const file = new File([blob], originalName, {
+            type: 'application/octet-stream'
+        });
+        const upload = await pinata.upload.public.file(file);
+        if (!upload?.cid) {
+            throw new Error('Pinata did not return a CID.');
+        }
+        return upload.cid;
+    } catch (err) {
+        if (err.statusCode) throw err;
+        console.error('[IPFS] Pinata upload failed:', err.message);
+        const error = new Error('Failed to store encrypted evidence on IPFS. Check PINATA_JWT, gateway URL, and network.');
+        error.statusCode = 502;
+        throw error;
+    }
 }
 
 async function fetchEncryptedBlobFromIpfs(ipfsCID) {

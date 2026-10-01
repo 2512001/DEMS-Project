@@ -140,8 +140,27 @@ const assignOrganizationAdmin = async (req, res, next) => {
             expiresAt
         });
 
-        // Send email
+        console.log('[ASSIGN-ADMIN] Sending invitation email to:', invitation.invitedEmail);
+        console.log('[ASSIGN-ADMIN] Organization:', organization.name);
+        console.log('[ASSIGN-ADMIN] Invitation ID:', invitation._id);
+        console.log('[ASSIGN-ADMIN] Token:', invitation.token);
+
         const emailResult = await sendAdminInvitationEmail(invitation, organization);
+
+        console.log('[ASSIGN-ADMIN] Email result:', {
+            success: emailResult?.success,
+            status: emailResult?.status,
+            code: emailResult?.code,
+            messageId: emailResult?.messageId || null,
+            error: emailResult?.error || null
+        });
+
+        await Invitation.findByIdAndUpdate(invitation._id, {
+            emailStatus: emailResult.status,
+            emailSentAt: emailResult.status === 'sent' ? new Date() : null,
+            emailMessageId: emailResult.messageId || null,
+            emailError: emailResult.error || null
+        });
 
         await writeAuditLog({
             actor: req.user,
@@ -149,20 +168,37 @@ const assignOrganizationAdmin = async (req, res, next) => {
             action: 'admin_invitation_created',
             targetType: 'invitation',
             targetId: invitation._id,
-            metadata: { 
+            metadata: {
                 invitedEmail: invitation.invitedEmail,
+                emailStatus: emailResult.status,
                 emailSent: emailResult.success
             }
         });
 
-        return res.status(201).json({ 
-            success: true, 
+        if (!emailResult.success) {
+            return res.status(502).json({
+                success: false,
+                message: 'Invitation was created but the email could not be sent. Check SMTP settings.',
+                code: 'EMAIL_SEND_FAILED',
+                error: emailResult.error,
+                data: {
+                    invitationId: invitation._id,
+                    invitedEmail: invitation.invitedEmail,
+                    expiresAt: invitation.expiresAt,
+                    emailStatus: emailResult.status
+                }
+            });
+        }
+
+        return res.status(201).json({
+            success: true,
             message: 'Organization administrator invitation sent successfully.',
-            data: { 
+            data: {
                 invitationId: invitation._id,
                 invitedEmail: invitation.invitedEmail,
                 expiresAt: invitation.expiresAt,
-                emailSent: emailResult.success
+                emailSent: true,
+                emailStatus: emailResult.status
             }
         });
     } catch (err) {

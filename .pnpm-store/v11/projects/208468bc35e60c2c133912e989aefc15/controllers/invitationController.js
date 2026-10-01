@@ -1,554 +1,474 @@
 const Invitation = require('../model/invitationModel');
-const Organization = require('../model/organizationModel');
 const User = require('../model/userModel');
-const { writeAuditLog } = require('../services/auditService');
-const { sendAdminInvitationEmail, sendEmployeeInvitationEmail } = require('../services/emailService');
+const Organization = require('../model/organizationModel');
+const {
+    sendAdminInvitationEmail,
+    sendEmployeeInvitationEmail,
+    sendEmployeeApplicationSubmittedEmail
+} = require('../services/emailService');
 const { httpError } = require('../services/accessControl');
 
-// Helper function to check invitation expiration
-function isInvitationExpired(invitation) {
-    return new Date() > new Date(invitation.expiresAt);
+function normalizeEmail(value) {
+    return String(value || '').trim().toLowerCase();
 }
 
-// Create organization admin invitation
-const createAdminInvitation = async (req, res, next) => {
+async function loadInvitation(token, expectedType) {
+    const invitation = await Invitation.findOne({ token });
+    if (!invitation) {
+        throw httpError(404, 'Invitation not found');
+    }
+    if (expectedType && invitation.invitationType !== expectedType) {
+        throw httpError(400, 'This invitation is not valid for this action.');
+    }
+    if (invitation.status === 'expired' || new Date(invitation.expiresAt) < new Date()) {
+        if (invitation.status === 'pending') {
+            invitation.status = 'expired';
+            await invitation.save();
+        }
+        throw httpError(400, 'Invitation has expired');
+    }
+    return invitation;
+}
+
+async function loadDbUser(reqUser) {
+    const user = await User.findById(reqUser.id);
+    if (!user) {
+        throw httpError(401, 'Authenticated user no longer exists.');
+    }
+    return user;
+}
+
+function assertEmailMatch(invitation, user, submittedEmail) {
+    const invited = normalizeEmail(invitation.invitedEmail);
+    const submitted = normalizeEmail(submittedEmail);
+    const profileEmail = normalizeEmail(user.profile?.email);
+
+    if (submitted && submitted !== invited) {
+        throw httpError(403, 'The verified email must match the invitation email.');
+    }
+    if (profileEmail && profileEmail !== invited) {
+        throw httpError(403, 'This invitation is not for the email address on your account.');
+    }
+    if (!submitted && !profileEmail) {
+        throw httpError(400, 'Confirm the invited email address before accepting.');
+    }
+}
+
+async function assertEmailAvailable(email, currentUserId) {
+    const existing = await User.findOne({ 'profile.email': email }).select('_id');
+    if (existing && existing._id.toString() !== String(currentUserId)) {
+        throw httpError(409, 'That email is already linked to another DEMS account.');
+    }
+}
+
+function publicOrganization(organization) {
+    if (!organization) return null;
+    return {
+        id: organization._id,
+        _id: organization._id,
+        name: organization.name,
+        organizationCode: organization.organizationCode
+    };
+}
+
+async function createAdminInvitation(req, res, next) {
     try {
         const { organizationId, invitedEmail, invitedName } = req.body;
-
-        if (!organizationId || !invitedEmail || !invitedName) {
-            return res.status(400).json({ 
-                success: false, 
-                message: 'Organization ID, email, and name are required.' 
-            });
-        }
-
-        // Verify organization exists
         const organization = await Organization.findById(organizationId);
         if (!organization) {
-            return res.status(404).json({ success: false, message: 'Organization not found.' });
+            throw httpError(404, 'Organization not found');
         }
 
-        // Check if invitation already exists for this email and organization
+        const email = normalizeEmail(invitedEmail);
+        if (!email || !invitedName) {
+            throw httpError(400, 'Invited email and name are required.');
+        }
+
         const existingInvitation = await Invitation.findOne({
+            invitedEmail: email,
+            status: 'pending',
             organizationId,
-            invitedEmail: invitedEmail.toLowerCase(),
-            invitationType: 'organization_admin',
-            status: 'pending'
+            invitationType: 'organization_admin'
         });
-
         if (existingInvitation) {
-            return res.status(409).json({ 
-                success: false, 
-                message: 'A pending invitation already exists for this email.' 
-            });
+            throw httpError(409, 'Pending invitation already exists for this email');
         }
 
-        // Create invitation (expires in 7 days)
-        const expiresAt = new Date();
-        expiresAt.setDate(expiresAt.getDate() + 7);
+        const existingUser = await User.findOne({ 'profile.email': email });
+        if (existingUser) {
+            if (existingUser.role === 'super_admin') {
+                throw httpError(409, 'Super Admin accounts cannot be assigned as organization admins.');
+            }
+            if (existingUser.role === 'admin' && existingUser.organizationId && existingUser.organizationId.toString() !== String(organizationId)) {
+                throw httpError(409, 'This user is already an administrator of another organization.');
+            }
+        }
 
         const invitation = await Invitation.create({
             organizationId,
-            invitedEmail: invitedEmail.toLowerCase(),
-            invitedName: invitedName.trim(),
+            invitedEmail: email,
+            invitedName,
             invitationType: 'organization_admin',
             invitedBy: req.user.id,
-            expiresAt
+            expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
         });
 
-        // Send email
         const emailResult = await sendAdminInvitationEmail(invitation, organization);
+        invitation.emailStatus = emailResult.status;
+        invitation.emailSentAt = emailResult.status === 'sent' ? new Date() : null;
+        invitation.emailMessageId = emailResult.messageId || null;
+        invitation.emailError = emailResult.error || null;
+        await invitation.save();
 
-        await writeAuditLog({
-            actor: req.user,
-            organizationId,
-            action: 'admin_invitation_created',
-            targetType: 'invitation',
-            targetId: invitation._id,
-            metadata: { 
-                invitedEmail: invitation.invitedEmail,
-                emailStatus: emailResult.success ? 'sent' : 'failed',
-                emailMode: emailResult.mode || 'production'
-            }
-        });
-
-        return res.status(201).json({
+        res.status(201).json({
             success: true,
-            message: 'Organization administrator invitation created successfully.',
+            message: emailResult.status === 'sent'
+                ? 'Admin invitation created and emailed.'
+                : 'Admin invitation created. Email was not delivered; share the in-app invitation link.',
             data: {
                 invitationId: invitation._id,
-                invitedEmail: invitation.invitedEmail,
-                expiresAt: invitation.expiresAt,
-                emailStatus: emailResult.success ? 'sent' : 'failed',
-                emailMode: emailResult.mode || 'production'
+                token: invitation.token,
+                emailStatus: emailResult.status,
+                emailError: emailResult.error || null
             }
         });
-    } catch (err) {
-        next(err);
+    } catch (error) {
+        next(error);
     }
-};
+}
 
-// Create employee invitation
-const createEmployeeInvitation = async (req, res, next) => {
+async function createEmployeeInvitation(req, res, next) {
     try {
-        const { 
-            organizationId, 
-            invitedEmail, 
+        const { invitedEmail, invitedName, department, designation, employeeId, contactPhone } = req.body;
+        const organizationId = req.user.role === 'admin' ? req.user.organizationId : req.body.organizationId;
+
+        if (!organizationId) {
+            throw httpError(400, 'Organization ID is required.');
+        }
+        if (req.user.role === 'admin' && String(req.user.organizationId) !== String(organizationId)) {
+            throw httpError(403, 'You can only invite employees to your own organization.');
+        }
+
+        const organization = await Organization.findById(organizationId);
+        if (!organization) {
+            throw httpError(404, 'Organization not found');
+        }
+
+        const email = normalizeEmail(invitedEmail);
+        if (!email || !invitedName) {
+            throw httpError(400, 'Invited email and name are required.');
+        }
+
+        const existingUser = await User.findOne({ 'profile.email': email });
+        if (existingUser) {
+            if (existingUser.role === 'admin' || existingUser.role === 'super_admin') {
+                throw httpError(409, 'Administrators cannot be invited as employees.');
+            }
+            if (existingUser.role === 'officer' && existingUser.organizationId && existingUser.organizationId.toString() === String(organizationId)) {
+                throw httpError(409, 'This user is already an officer of this organization.');
+            }
+            if (existingUser.organizationId && existingUser.organizationId.toString() !== String(organizationId) && existingUser.membershipStatus === 'active') {
+                throw httpError(409, 'This user already belongs to another organization.');
+            }
+        }
+
+        const existingInvitation = await Invitation.findOne({
+            invitedEmail: email,
+            status: 'pending',
+            organizationId,
+            invitationType: 'employee'
+        });
+        if (existingInvitation) {
+            throw httpError(409, 'Pending invitation already exists for this email');
+        }
+
+        const invitation = await Invitation.create({
+            organizationId,
+            invitedEmail: email,
             invitedName,
+            invitationType: 'employee',
+            invitedBy: req.user.id,
             department,
             designation,
             employeeId,
-            contactPhone
-        } = req.body;
-
-        if (!organizationId || !invitedEmail || !invitedName) {
-            return res.status(400).json({ 
-                success: false, 
-                message: 'Organization ID, email, and name are required.' 
-            });
-        }
-
-        // Verify organization exists
-        const organization = await Organization.findById(organizationId);
-        if (!organization) {
-            return res.status(404).json({ success: false, message: 'Organization not found.' });
-        }
-
-        // Check if invitation already exists
-        const existingInvitation = await Invitation.findOne({
-            organizationId,
-            invitedEmail: invitedEmail.toLowerCase(),
-            invitationType: 'employee',
-            status: 'pending'
+            contactPhone,
+            expiresAt: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000)
         });
 
-        if (existingInvitation) {
-            return res.status(409).json({ 
-                success: false, 
-                message: 'A pending invitation already exists for this email.' 
-            });
-        }
-
-        // Create invitation (expires in 14 days)
-        const expiresAt = new Date();
-        expiresAt.setDate(expiresAt.getDate() + 14);
-
-        const invitation = await Invitation.create({
-            organizationId,
-            invitedEmail: invitedEmail.toLowerCase(),
-            invitedName: invitedName.trim(),
-            invitationType: 'employee',
-            invitedBy: req.user.id,
-            expiresAt,
-            department: department?.trim() || '',
-            designation: designation?.trim() || '',
-            employeeId: employeeId?.trim() || '',
-            contactPhone: contactPhone?.trim() || ''
-        });
-
-        // Send email
         const emailResult = await sendEmployeeInvitationEmail(invitation, organization);
+        invitation.emailStatus = emailResult.status;
+        invitation.emailSentAt = emailResult.status === 'sent' ? new Date() : null;
+        invitation.emailMessageId = emailResult.messageId || null;
+        invitation.emailError = emailResult.error || null;
+        await invitation.save();
 
-        await writeAuditLog({
-            actor: req.user,
-            organizationId,
-            action: 'employee_invitation_created',
-            targetType: 'invitation',
-            targetId: invitation._id,
-            metadata: { 
-                invitedEmail: invitation.invitedEmail,
-                department: invitation.department,
-                designation: invitation.designation,
-                emailStatus: emailResult.success ? 'sent' : 'failed',
-                emailMode: emailResult.mode || 'production'
-            }
-        });
-
-        return res.status(201).json({
+        res.status(201).json({
             success: true,
-            message: 'Employee invitation created successfully.',
+            message: emailResult.status === 'sent'
+                ? 'Employee invitation created and emailed.'
+                : 'Employee invitation created. Email was not delivered; share the in-app invitation link.',
             data: {
                 invitationId: invitation._id,
+                token: invitation.token,
+                emailStatus: emailResult.status,
+                emailError: emailResult.error || null
+            }
+        });
+    } catch (error) {
+        next(error);
+    }
+}
+
+async function getInvitationByToken(req, res, next) {
+    try {
+        const invitation = await loadInvitation(req.params.token);
+        if (invitation.status !== 'pending' && invitation.status !== 'accepted') {
+            throw httpError(400, 'Invitation is no longer valid');
+        }
+
+        const organization = await Organization.findById(invitation.organizationId);
+        const organizationPayload = publicOrganization(organization);
+
+        res.json({
+            success: true,
+            data: {
+                invitationId: invitation._id,
+                token: invitation.token,
                 invitedEmail: invitation.invitedEmail,
-                expiresAt: invitation.expiresAt,
-                emailStatus: emailResult.success ? 'sent' : 'failed',
-                emailMode: emailResult.mode || 'production'
-            }
-        });
-    } catch (err) {
-        next(err);
-    }
-};
-
-// Get invitation by token
-const getInvitationByToken = async (req, res, next) => {
-    try {
-        const { token } = req.params;
-
-        if (!token) {
-            return res.status(400).json({ success: false, message: 'Invitation token is required.' });
-        }
-
-        const invitation = await Invitation.findOne({ token })
-            .populate('organizationId')
-            .populate('invitedBy', 'profile.displayName profile.email');
-
-        if (!invitation) {
-            return res.status(404).json({ success: false, message: 'Invitation not found.' });
-        }
-
-        // Check if expired
-        if (isInvitationExpired(invitation)) {
-            await Invitation.findByIdAndUpdate(invitation._id, { status: 'expired' });
-            return res.status(410).json({ success: false, message: 'This invitation has expired.' });
-        }
-
-        // Check if already accepted
-        if (invitation.status === 'accepted') {
-            return res.status(409).json({ success: false, message: 'This invitation has already been accepted.' });
-        }
-
-        // Check if revoked
-        if (invitation.status === 'revoked') {
-            return res.status(403).json({ success: false, message: 'This invitation has been revoked.' });
-        }
-
-        return res.status(200).json({
-            success: true,
-            data: invitation
-        });
-    } catch (err) {
-        next(err);
-    }
-};
-
-// Accept invitation (admin)
-const acceptAdminInvitation = async (req, res, next) => {
-    try {
-        const { token } = req.params;
-        const { email, name, phone } = req.body;
-
-        if (!token) {
-            return res.status(400).json({ success: false, message: 'Invitation token is required.' });
-        }
-
-        const invitation = await Invitation.findOne({ token })
-            .populate('organizationId');
-
-        if (!invitation) {
-            return res.status(404).json({ success: false, message: 'Invitation not found.' });
-        }
-
-        if (invitation.invitationType !== 'organization_admin') {
-            return res.status(400).json({ success: false, message: 'This is not an admin invitation.' });
-        }
-
-        if (invitation.status !== 'pending') {
-            return res.status(409).json({ success: false, message: 'This invitation is no longer valid.' });
-        }
-
-        if (isInvitationExpired(invitation)) {
-            await Invitation.findByIdAndUpdate(invitation._id, { status: 'expired' });
-            return res.status(410).json({ success: false, message: 'This invitation has expired.' });
-        }
-
-        // Verify email matches invitation
-        if (email && email.toLowerCase() !== invitation.invitedEmail.toLowerCase()) {
-            return res.status(400).json({ success: false, message: 'Email does not match invitation.' });
-        }
-
-        // Update user
-        const user = await User.findById(req.user.id);
-        if (!user) {
-            return res.status(404).json({ success: false, message: 'User not found.' });
-        }
-
-        // Check if user already belongs to another organization
-        if (user.organizationId && String(user.organizationId) !== String(invitation.organizationId._id)) {
-            return res.status(409).json({ 
-                success: false, 
-                message: 'You already belong to another organization.' 
-            });
-        }
-
-        // Update user role and organization
-        user.role = 'admin';
-        user.organizationId = invitation.organizationId._id;
-        user.profile.displayName = name || user.profile.displayName;
-        user.profile.email = email || user.profile.email;
-        user.profile.phone = phone || user.profile.phone;
-        user.accountStatus = 'active';
-        await user.save();
-
-        // Update invitation
-        await Invitation.findByIdAndUpdate(invitation._id, {
-            status: 'accepted',
-            acceptedAt: new Date(),
-            acceptedBy: user._id
-        });
-
-        await writeAuditLog({
-            actor: req.user,
-            organizationId: invitation.organizationId._id,
-            action: 'admin_invitation_accepted',
-            targetType: 'invitation',
-            targetId: invitation._id,
-            result: 'success'
-        });
-
-        return res.status(200).json({
-            success: true,
-            message: 'You are now an Organization Administrator.',
-            data: {
-                role: user.role,
-                organizationId: user.organizationId,
-                organizationName: invitation.organizationId.name
-            }
-        });
-    } catch (err) {
-        next(err);
-    }
-};
-
-// Accept invitation (employee) - first step
-const acceptEmployeeInvitation = async (req, res, next) => {
-    try {
-        const { token } = req.params;
-
-        if (!token) {
-            return res.status(400).json({ success: false, message: 'Invitation token is required.' });
-        }
-
-        const invitation = await Invitation.findOne({ token })
-            .populate('organizationId');
-
-        if (!invitation) {
-            return res.status(404).json({ success: false, message: 'Invitation not found.' });
-        }
-
-        if (invitation.invitationType !== 'employee') {
-            return res.status(400).json({ success: false, message: 'This is not an employee invitation.' });
-        }
-
-        if (invitation.status !== 'pending') {
-            return res.status(409).json({ success: false, message: 'This invitation is no longer valid.' });
-        }
-
-        if (isInvitationExpired(invitation)) {
-            await Invitation.findByIdAndUpdate(invitation._id, { status: 'expired' });
-            return res.status(410).json({ success: false, message: 'This invitation has expired.' });
-        }
-
-        // Update invitation status to show it's been opened
-        // User will need to complete profile and submit application
-        return res.status(200).json({
-            success: true,
-            message: 'Invitation valid. Please complete your profile.',
-            data: {
-                organizationName: invitation.organizationId.name,
-                organizationCode: invitation.organizationId.organizationCode,
                 invitedName: invitation.invitedName,
+                invitationType: invitation.invitationType,
+                status: invitation.status,
+                organization: organizationPayload,
+                organizationId: organizationPayload,
                 department: invitation.department,
                 designation: invitation.designation,
-                employeeId: invitation.employeeId
+                employeeId: invitation.employeeId,
+                expiresAt: invitation.expiresAt
             }
         });
-    } catch (err) {
-        next(err);
+    } catch (error) {
+        next(error);
     }
-};
+}
 
-// Submit employee application after accepting invitation
-const submitEmployeeApplication = async (req, res, next) => {
+async function acceptAdminInvitation(req, res, next) {
     try {
-        const { token } = req.params;
-        const { documents } = req.files || {};
-        
-        // Get profile data from body
-        const profileData = {
-            displayName: req.body.displayName,
-            email: req.body.email,
-            phone: req.body.phone
-        };
-
-        if (!token) {
-            return res.status(400).json({ success: false, message: 'Invitation token is required.' });
-        }
-
-        const invitation = await Invitation.findOne({ token })
-            .populate('organizationId');
-
-        if (!invitation) {
-            return res.status(404).json({ success: false, message: 'Invitation not found.' });
-        }
-
-        if (invitation.invitationType !== 'employee') {
-            return res.status(400).json({ success: false, message: 'This is not an employee invitation.' });
-        }
-
+        const invitation = await loadInvitation(req.params.token, 'organization_admin');
         if (invitation.status !== 'pending') {
-            return res.status(409).json({ success: false, message: 'This invitation is no longer valid.' });
+            throw httpError(400, 'Invitation is no longer valid');
         }
 
-        if (isInvitationExpired(invitation)) {
-            await Invitation.findByIdAndUpdate(invitation._id, { status: 'expired' });
-            return res.status(410).json({ success: false, message: 'This invitation has expired.' });
+        const user = await loadDbUser(req.user);
+        const submittedEmail = normalizeEmail(req.body.email || user.profile?.email);
+        assertEmailMatch(invitation, user, submittedEmail);
+        await assertEmailAvailable(invitation.invitedEmail, user._id);
+
+        if (user.role === 'super_admin') {
+            throw httpError(409, 'Super Admin accounts cannot accept organization admin invitations.');
+        }
+        if (user.role === 'admin' && user.organizationId && user.organizationId.toString() !== invitation.organizationId.toString()) {
+            throw httpError(409, 'This account already administers another organization.');
         }
 
-        // Update user profile
-        const user = await User.findById(req.user.id);
-        if (!user) {
-            return res.status(404).json({ success: false, message: 'User not found.' });
-        }
-
-        // Check if user already belongs to another organization
-        if (user.organizationId && String(user.organizationId) !== String(invitation.organizationId._id)) {
-            return res.status(409).json({ 
-                success: false, 
-                message: 'You already belong to another organization.' 
-            });
-        }
-
-        // Update profile
-        if (profileData.displayName) user.profile.displayName = profileData.displayName;
-        if (profileData.email) user.profile.email = profileData.email;
-        if (profileData.phone) user.profile.phone = profileData.phone;
-        user.profile.department = invitation.department;
-        user.profile.designation = invitation.designation;
-        user.profile.employeeId = invitation.employeeId;
-
-        // Process documents
-        const documentArray = [];
-        if (documents) {
-            const docFields = Array.isArray(documents) ? documents : [documents];
-            for (const doc of docFields) {
-                if (doc) {
-                    documentArray.push({
-                        fieldName: doc.fieldname,
-                        originalName: doc.originalname,
-                        path: doc.path,
-                        mimeType: doc.mimetype,
-                        size: doc.size,
-                        uploadedAt: new Date()
-                    });
-                }
-            }
-        }
-
-        // Set membership status to pending approval
-        user.membershipStatus = 'pending_approval';
-        user.officerVerification = {
-            status: 'pending',
-            documents: documentArray,
-            badgeNumber: invitation.employeeId || '',
-            governmentIdNumber: '',
-            aadhaarNumber: '',
-            requestedAt: new Date(),
-            requestedOrganizationId: invitation.organizationId._id
+        user.profile = {
+            ...(user.profile?.toObject?.() || user.profile || {}),
+            email: invitation.invitedEmail,
+            displayName: String(req.body.name || invitation.invitedName || user.profile?.displayName || '').trim(),
+            phone: String(req.body.phone || user.profile?.phone || '').trim()
         };
-
+        user.role = 'admin';
+        user.organizationId = invitation.organizationId;
+        user.membershipStatus = 'active';
         await user.save();
 
-        // Update invitation
-        await Invitation.findByIdAndUpdate(invitation._id, {
-            status: 'accepted',
-            acceptedAt: new Date(),
-            acceptedBy: user._id
-        });
+        invitation.status = 'accepted';
+        invitation.acceptedAt = new Date();
+        invitation.acceptedBy = user._id;
+        invitation.acceptedWalletAddress = user.walletAddress;
+        await invitation.save();
 
-        await writeAuditLog({
-            actor: req.user,
-            organizationId: invitation.organizationId._id,
-            action: 'employee_application_submitted',
-            targetType: 'user',
-            targetId: user._id,
-            result: 'pending_approval'
-        });
-
-        return res.status(200).json({
-            success: true,
-            message: 'Employee application submitted. Awaiting Organization Admin approval.',
-            data: {
-                membershipStatus: user.membershipStatus,
-                organizationName: invitation.organizationId.name
-            }
-        });
-    } catch (err) {
-        next(err);
-    }
-};
-
-// List pending invitations for an organization
-const getPendingInvitations = async (req, res, next) => {
-    try {
-        const { organizationId } = req.params;
-
-        if (!organizationId) {
-            return res.status(400).json({ success: false, message: 'Organization ID is required.' });
+        const organization = await Organization.findById(invitation.organizationId);
+        if (organization && !organization.adminId) {
+            organization.adminId = user._id;
+            await organization.save();
         }
 
-        // Verify user has access to this organization
-        if (req.user.role !== 'super_admin' && String(req.user.organizationId) !== String(organizationId)) {
-            return res.status(403).json({ success: false, message: 'You are not authorized to view invitations for this organization.' });
+        res.json({
+            success: true,
+            message: 'Invitation accepted successfully',
+            data: {
+                role: user.role,
+                organizationId: user.organizationId
+            }
+        });
+    } catch (error) {
+        next(error);
+    }
+}
+
+async function acceptEmployeeInvitation(req, res, next) {
+    try {
+        const invitation = await loadInvitation(req.params.token, 'employee');
+        if (invitation.status !== 'pending') {
+            throw httpError(400, 'Invitation is no longer valid');
+        }
+
+        const user = await loadDbUser(req.user);
+        const submittedEmail = normalizeEmail(req.body.email || user.profile?.email);
+        assertEmailMatch(invitation, user, submittedEmail);
+        await assertEmailAvailable(invitation.invitedEmail, user._id);
+
+        if (user.role === 'admin' || user.role === 'super_admin') {
+            throw httpError(409, 'Administrator accounts cannot accept employee invitations.');
+        }
+
+        user.profile = {
+            ...(user.profile?.toObject?.() || user.profile || {}),
+            email: invitation.invitedEmail,
+            displayName: String(req.body.name || invitation.invitedName || user.profile?.displayName || '').trim(),
+            phone: String(req.body.phone || user.profile?.phone || '').trim()
+        };
+        await user.save();
+
+        invitation.status = 'accepted';
+        invitation.acceptedAt = new Date();
+        invitation.acceptedBy = user._id;
+        invitation.acceptedWalletAddress = user.walletAddress;
+        await invitation.save();
+
+        res.json({
+            success: true,
+            message: 'Invitation accepted. Complete your application documents. You remain a citizen until an organization admin approves the request.',
+            data: {
+                invitationId: invitation._id,
+                organizationId: invitation.organizationId,
+                role: user.role
+            }
+        });
+    } catch (error) {
+        next(error);
+    }
+}
+
+async function submitEmployeeApplication(req, res, next) {
+    try {
+        const invitation = await loadInvitation(req.params.token, 'employee');
+        const user = await loadDbUser(req.user);
+        const documents = req.files ? req.files.documents : [];
+
+        if (invitation.status !== 'accepted') {
+            throw httpError(400, 'Accept the invitation before submitting an application.');
+        }
+        if (!invitation.acceptedBy || invitation.acceptedBy.toString() !== user._id.toString()) {
+            throw httpError(403, 'This invitation is not for your account');
+        }
+        if (!documents.length) {
+            throw httpError(400, 'At least one verification document is required.');
+        }
+
+        user.profile = {
+            ...(user.profile?.toObject?.() || user.profile || {}),
+            email: invitation.invitedEmail,
+            displayName: String(req.body.displayName || req.body.name || invitation.invitedName || user.profile?.displayName || '').trim(),
+            phone: String(req.body.phone || invitation.contactPhone || user.profile?.phone || '').trim(),
+            department: invitation.department || user.profile?.department || '',
+            designation: invitation.designation || user.profile?.designation || '',
+            employeeId: invitation.employeeId || user.profile?.employeeId || ''
+        };
+        user.officerVerification = {
+            status: 'pending',
+            requestedAt: new Date(),
+            requestedOrganizationId: invitation.organizationId,
+            documents: documents.map((doc) => ({
+                fieldName: 'documents',
+                originalName: doc.originalname,
+                path: doc.path,
+                mimeType: doc.mimetype,
+                size: doc.size
+            })),
+            aadhaarNumber: req.body.aadhaarNumber || '',
+            governmentIdNumber: req.body.governmentIdNumber || '',
+            badgeNumber: req.body.badgeNumber || '',
+            rejectionReason: '',
+            reviewedBy: null,
+            reviewedAt: null
+        };
+        user.membershipStatus = 'pending_approval';
+        user.membershipRejectionReason = '';
+        user.role = 'citizen';
+        await user.save();
+
+        const organization = await Organization.findById(invitation.organizationId);
+        if (organization) {
+            const inviter = await User.findById(invitation.invitedBy).select('profile.email');
+            await sendEmployeeApplicationSubmittedEmail(
+                {
+                    invitedName: user.profile.displayName || invitation.invitedName,
+                    invitedEmail: invitation.invitedEmail,
+                    designation: invitation.designation,
+                    department: invitation.department,
+                    notifyEmail: inviter?.profile?.email
+                },
+                organization
+            );
+        }
+
+        res.json({
+            success: true,
+            message: 'Application submitted. You remain a citizen until the inviting organization admin approves it.',
+            data: {
+                status: 'pending',
+                role: user.role,
+                requestedOrganizationId: invitation.organizationId
+            }
+        });
+    } catch (error) {
+        next(error);
+    }
+}
+
+async function getPendingInvitations(req, res, next) {
+    try {
+        const { organizationId } = req.params;
+        if (req.user.role === 'admin' && String(req.user.organizationId || '') !== String(organizationId)) {
+            throw httpError(403, 'You do not have access to this organization');
         }
 
         const invitations = await Invitation.find({
             organizationId,
-            status: 'pending'
-        })
-        .populate('invitedBy', 'profile.displayName')
-        .sort({ createdAt: -1 });
+            status: { $in: ['pending', 'accepted'] }
+        }).sort({ createdAt: -1 });
 
-        return res.status(200).json({
+        res.json({
             success: true,
-            count: invitations.length,
             data: invitations
         });
-    } catch (err) {
-        next(err);
+    } catch (error) {
+        next(error);
     }
-};
+}
 
-// Revoke invitation
-const revokeInvitation = async (req, res, next) => {
+async function revokeInvitation(req, res, next) {
     try {
-        const { invitationId } = req.params;
-
-        const invitation = await Invitation.findById(invitationId)
-            .populate('organizationId');
-
+        const invitation = await Invitation.findById(req.params.invitationId);
         if (!invitation) {
-            return res.status(404).json({ success: false, message: 'Invitation not found.' });
+            throw httpError(404, 'Invitation not found');
+        }
+        if (req.user.role === 'admin' && invitation.organizationId.toString() !== String(req.user.organizationId || '')) {
+            throw httpError(403, 'You do not have access to this organization');
         }
 
-        // Verify user has access to this organization
-        if (req.user.role !== 'super_admin' && String(req.user.organizationId) !== String(invitation.organizationId._id)) {
-            return res.status(403).json({ success: false, message: 'You are not authorized to revoke this invitation.' });
-        }
+        invitation.status = 'revoked';
+        await invitation.save();
 
-        if (invitation.status !== 'pending') {
-            return res.status(409).json({ success: false, message: 'Can only revoke pending invitations.' });
-        }
-
-        await Invitation.findByIdAndUpdate(invitationId, { status: 'revoked' });
-
-        await writeAuditLog({
-            actor: req.user,
-            organizationId: invitation.organizationId._id,
-            action: 'invitation_revoked',
-            targetType: 'invitation',
-            targetId: invitationId,
-            result: 'success'
-        });
-
-        return res.status(200).json({
+        res.json({
             success: true,
-            message: 'Invitation revoked successfully.'
+            message: 'Invitation revoked successfully'
         });
-    } catch (err) {
-        next(err);
+    } catch (error) {
+        next(error);
     }
-};
+}
 
 module.exports = {
     createAdminInvitation,

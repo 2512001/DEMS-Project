@@ -37,7 +37,8 @@ const invitationSchema = new Schema({
         type: String,
         required: true,
         unique: true,
-        index: true
+        index: true,
+        default: () => crypto.randomBytes(32).toString('hex')
     },
     status: {
         type: String,
@@ -57,6 +58,30 @@ const invitationSchema = new Schema({
     acceptedBy: {
         type: Schema.Types.ObjectId,
         ref: 'User',
+        default: null
+    },
+    acceptedWalletAddress: {
+        type: String,
+        trim: true,
+        lowercase: true,
+        default: null
+    },
+    // Email delivery tracking
+    emailStatus: {
+        type: String,
+        enum: ['not_configured', 'sent', 'failed'],
+        default: 'not_configured'
+    },
+    emailSentAt: {
+        type: Date,
+        default: null
+    },
+    emailMessageId: {
+        type: String,
+        default: null
+    },
+    emailError: {
+        type: String,
         default: null
     },
     // Employee-specific fields
@@ -82,12 +107,10 @@ const invitationSchema = new Schema({
     }
 }, { timestamps: true });
 
-// Generate secure token before saving
-invitationSchema.pre('save', function(next) {
+invitationSchema.pre('validate', async function () {
     if (!this.token) {
         this.token = crypto.randomBytes(32).toString('hex');
     }
-    next();
 });
 
 // Index for cleanup of expired invitations

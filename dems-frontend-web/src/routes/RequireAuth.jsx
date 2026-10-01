@@ -10,17 +10,13 @@ export default function RequireAuth({ roles }) {
     return <Navigate to="/auth/wallet-login" replace state={{ from: location }} />;
   }
 
-  if (roles?.length && !roles.includes(role)) {
-    // Redirect based on user's actual role
-    if (role === 'super_admin') {
-      return <Navigate to="/superadmin/dashboard" replace />;
-    } else if (role === 'admin') {
-      return <Navigate to="/admin/dashboard" replace />;
-    } else if (role === 'officer') {
-      return <Navigate to="/officer/dashboard" replace />;
-    } else {
-      return <Navigate to="/citizen/dashboard" replace />;
-    }
+  if (roles?.length && role && !roles.includes(role)) {
+    return <Navigate to={
+      role === 'super_admin' ? '/superadmin/dashboard'
+        : role === 'admin' ? '/admin/dashboard'
+          : role === 'officer' ? '/officer/dashboard'
+            : '/citizen/dashboard'
+    } replace />;
   }
 
   return <Outlet />;

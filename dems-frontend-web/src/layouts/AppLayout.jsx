@@ -30,6 +30,9 @@ const nav = {
     ['Employee Approval', '/admin/officer-approval', BadgeCheck],
     ['Audit Logs', '/admin/audit-logs', ClipboardList],
     ['Organization Settings', '/admin/organization', Settings]
+  ],
+  super_admin: [
+    ['Dashboard', '/superadmin/dashboard', ShieldCheck]
   ]
 };
 

@@ -20,13 +20,14 @@ const generateNonce = async (req, res, next) => {
 
         const nonce = crypto.randomBytes(32).toString('hex');
         
-        // Check if user exists first
+        // Check if user exists first - NEVER overwrite existing role
         let user = await User.findOne({ walletAddress });
         
         if (user) {
-            // Update existing user's nonce only - never change role
+            // Update existing user's nonce only - preserve existing role
             user.nonce = nonce;
             await user.save();
+            console.log(`[AUTH] Nonce issued for existing wallet=${walletAddress}, role=${user.role}`);
         } else {
             // Create new user with default citizen role
             user = await User.create({
@@ -34,9 +35,8 @@ const generateNonce = async (req, res, next) => {
                 nonce,
                 role: 'citizen'
             });
+            console.log(`[AUTH] New user created with wallet=${walletAddress}, role=citizen`);
         }
-
-        console.log(`[AUTH] Nonce issued for wallet=${walletAddress}, role=${user.role}`);
 
         return res.status(200).json({
             success: true,
@@ -115,7 +115,13 @@ const verifySignature = async (req, res, next) => {
 const getMe = async (req, res, next) => {
     try {
         const user = await User.findById(req.user.id)
-            .select('_id walletAddress role organizationId profile officerVerification createdAt updatedAt');
+            .select('_id walletAddress role organizationId accountStatus profile officerVerification membershipStatus createdAt updatedAt');
+
+        if (!user) {
+            return res.status(404).json({ success: false, message: 'User not found.' });
+        }
+
+        console.log('[AUTH] /me - User role:', user.role, 'organizationId:', user.organizationId);
 
         return res.status(200).json({ success: true, user });
     } catch (err) {
