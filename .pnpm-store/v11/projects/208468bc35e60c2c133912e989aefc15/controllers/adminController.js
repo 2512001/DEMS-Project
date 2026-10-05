@@ -287,8 +287,9 @@ const reviewMembershipApplication = async (req, res, next) => {
             return res.status(403).json({ success: false, message: 'You are not authorized to review this application.' });
         }
 
-        if (existing.role === 'admin') {
-            return res.status(409).json({ success: false, message: 'Organization admins cannot be converted into employees.' });
+        // CRITICAL: Never downgrade Super Admins or Admins
+        if (existing.role === 'super_admin' || existing.role === 'admin') {
+            return res.status(409).json({ success: false, message: 'Administrator accounts cannot be reviewed or downgraded through this process.' });
         }
 
         const updates = {

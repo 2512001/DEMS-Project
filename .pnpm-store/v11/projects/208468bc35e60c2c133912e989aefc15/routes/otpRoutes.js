@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { createOTP, verifyOTP, resendOTP, canResendOTP, getUserOTPStatus } = require('../services/otpService');
 const { sendEmail } = require('../services/emailService');
+const { protect } = require('../middleware/authMiddleware');
 const User = require('../model/userModel');
 
 // ============================================================

@@ -136,9 +136,12 @@ const updateProfile = async (req, res, next) => {
             email: String(req.body.email || '').trim().slice(0, 160)
         };
 
+        // SECURITY: Never allow role changes through profile updates
+        const updates = { $set: { profile } };
+
         const user = await User.findByIdAndUpdate(
             req.user.id,
-            { $set: { profile } },
+            updates,
             { new: true }
         ).select('_id walletAddress role organizationId profile officerVerification createdAt updatedAt');
 

@@ -1,22 +1,22 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, Clock, Mail, Building2, User, UploadCloud, FileText, Check, X } from 'lucide-react';
 import { getInvitationByToken, acceptEmployeeInvitation, submitEmployeeApplication } from '../../api/invitations.js';
+import { requestEmailOTP, verifyEmailOTP, getOTPStatus } from '../../api/otp.js';
 import { useAuth } from '../../auth/AuthContext.jsx';
 
 export default function EmployeeInvitation() {
     const navigate = useNavigate();
-    const [searchParams] = setSearchParams();
-    const { user, refreshUser } = useAuth();
+    const [searchParams] = useSearchParams();
+    const { user, refreshUser, loginWithWallet } = useAuth();
     const token = searchParams.get('token');
-    const [step, setStep] = useState('view'); // view, profile, documents
+    const [step, setStep] = useState('view'); // view, profile, documents, otp_verification
     const [error, setError] = useState('');
-    
-    // Profile data
-    const [displayName, setDisplayName] = useState('');
-    const [email, setEmail] = useState('');
-    const [phone, setPhone] = useState('');
+    const [otp, setOtp] = useState('');
+    const [otpVerified, setOtpVerified] = useState(false);
+    const [resendOtpEnabled, setResendOtpEnabled] = useState(false);
+    const [resendCount, setResendCount] = useState(0);
 
     const invitationQuery = useQuery({
         queryKey: ['invitation', token],
@@ -45,6 +45,38 @@ export default function EmployeeInvitation() {
         }
     });
 
+    const requestOtp = useMutation({
+        mutationFn: () => requestEmailOTP(invitation.invitedEmail),
+        onSuccess: (response) => {
+            setOtpVerified(false);
+            setResendCount(response?.data?.attemptsRemaining !== undefined ? 3 - (response.data.attemptsRemaining || 0) : 3);
+        },
+        onError: (err) => {
+            setError(err?.response?.data?.message || err.message || 'Failed to request OTP');
+        }
+    });
+
+    const verifyOtp = useMutation({
+        mutationFn: () => verifyEmailOTP(invitation.invitedEmail, otp),
+        onSuccess: (response) => {
+            setOtpVerified(true);
+            setStep('profile');
+        },
+        onError: (err) => {
+            setError(err?.response?.data?.message || err.message || 'Invalid OTP');
+            setResendOtpEnabled(true);
+        }
+    });
+
+    useEffect(() => {
+        // Check OTP status after invitation accepted
+        if (otpVerified && invitation?.invitedEmail) {
+            getOTPStatus().then(statusResponse => {
+                // OTP status checked, continue
+            }).catch(() => {});
+        }
+    }, [otpVerified, invitation?.invitedEmail]);
+
     const handleAcceptInvitation = () => {
         setError('');
         acceptInvitation.mutate();
@@ -53,7 +85,19 @@ export default function EmployeeInvitation() {
     const handleProfileSubmit = (e) => {
         e.preventDefault();
         setError('');
-        setStep('documents');
+        // Check if OTP verification is required
+        if (!otpVerified && invitation?.invitedEmail) {
+            setStep('otp_verification');
+            requestOtp.mutate();
+        } else {
+            setStep('documents');
+        }
+    };
+
+    const handleOtpSubmit = (e) => {
+        e.preventDefault();
+        setError('');
+        verifyOtp.mutate();
     };
 
     const handleDocumentsSubmit = (e) => {

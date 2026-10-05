@@ -366,6 +366,11 @@ async function submitEmployeeApplication(req, res, next) {
             throw httpError(400, 'At least one verification document is required.');
         }
 
+        // CRITICAL: Never downgrade Super Admins or Admins
+        if (user.role === 'super_admin' || user.role === 'admin') {
+            throw httpError(409, 'Administrator accounts cannot submit employee applications.');
+        }
+
         user.profile = {
             ...(user.profile?.toObject?.() || user.profile || {}),
             email: invitation.invitedEmail,
@@ -395,7 +400,7 @@ async function submitEmployeeApplication(req, res, next) {
         };
         user.membershipStatus = 'pending_approval';
         user.membershipRejectionReason = '';
-        user.role = 'citizen';
+        // Do NOT change role - preserve existing role until approved
         await user.save();
 
         const organization = await Organization.findById(invitation.organizationId);
