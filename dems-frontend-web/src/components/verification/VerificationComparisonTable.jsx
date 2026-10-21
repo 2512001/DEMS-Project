@@ -1,29 +1,8 @@
 import React from 'react';
-import {
-  CheckCircle2,
-  XCircle,
-  Fingerprint,
-  Link2,
-  User,
-  Hash
-} from 'lucide-react';
-
-const ICON_MAP = {
-  mongoFileHash: Fingerprint,
-  ipfsContentHash: Fingerprint,
-  blockchainHash: Fingerprint,
-  fileHash: Fingerprint,
-  ipfsCID: Link2,
-  generatedHash: Fingerprint,
-  uploadedBy: User,
-  evidenceId: Hash
-};
+import { CheckCircle2, XCircle } from 'lucide-react';
 
 function displayValue(value) {
-  if (value === null || value === undefined || value === '') {
-    return 'N/A';
-  }
-
+  if (value === null || value === undefined || value === '') return '—';
   return String(value);
 }
 
@@ -39,68 +18,43 @@ export default function VerificationComparisonTable({ checks = [], mismatches = 
         status: 'MISMATCH'
       }));
 
-  if (!rows.length) {
-    return null;
-  }
+  if (!rows.length) return null;
 
   return (
-    <div className="overflow-hidden rounded-2xl border border-slate-700/50 bg-gradient-to-br from-slate-900/60 to-slate-950/60 backdrop-blur-sm">
-      <div className="border-b border-slate-700/50 bg-slate-900/40 px-6 py-4">
-        <h3 className="text-lg font-bold text-white">Integrity comparison</h3>
-        <p className="text-sm text-slate-400">MongoDB metadata, recovered IPFS content, and on-chain proofs</p>
+    <div className="overflow-hidden rounded-card border border-line bg-card">
+      <div className="border-b border-line px-4 py-3">
+        <h3 className="text-[13.5px] font-semibold text-ink">Integrity comparison</h3>
+        <p className="mt-0.5 text-[12px] text-ink-muted">
+          Stored metadata, recovered IPFS content, and on-chain proofs
+        </p>
       </div>
-
       <div className="overflow-x-auto">
-        <table className="w-full text-left text-sm">
-          <thead className="border-b border-slate-700/40 bg-slate-900/30">
+        <table className="data-table min-w-[720px]">
+          <thead>
             <tr>
-              <th className="px-6 py-4 font-semibold text-slate-300">Check</th>
-              <th className="px-6 py-4 font-semibold text-slate-300">MongoDB</th>
-              <th className="px-6 py-4 font-semibold text-slate-300">IPFS</th>
-              <th className="px-6 py-4 font-semibold text-slate-300">Blockchain</th>
-              <th className="px-6 py-4 font-semibold text-slate-300">Status</th>
+              <th scope="col">Check</th>
+              <th scope="col">Stored record</th>
+              <th scope="col">IPFS</th>
+              <th scope="col">Blockchain</th>
+              <th scope="col">Result</th>
             </tr>
           </thead>
           <tbody>
             {rows.map((item) => {
-              const Icon = ICON_MAP[item.field] || Hash;
               const matched = item.matched !== false && item.status !== 'MISMATCH';
-
               return (
-                <tr
-                  key={item.field}
-                  className="border-b border-slate-800/80 bg-slate-900/20"
-                >
-                  <td className="px-6 py-4">
-                    <div className="flex items-center gap-3">
-                      <div className="flex items-center justify-center rounded-lg bg-slate-800 p-2">
-                        <Icon size={16} className="text-slate-400" />
-                      </div>
-                      <span className="font-medium text-white">{item.label || item.field}</span>
-                    </div>
+                <tr key={item.field}>
+                  <td className="font-medium capitalize text-ink">
+                    {String(item.label || item.field).replaceAll(/([A-Z])/g, ' $1')}
                   </td>
-                  <td className="px-6 py-4">
-                    <div className="max-w-xs break-all font-mono text-xs text-slate-300">
-                      {displayValue(item.mongodb)}
-                    </div>
-                  </td>
-                  <td className="px-6 py-4">
-                    <div className="max-w-xs break-all font-mono text-xs text-slate-300">
-                      {displayValue(item.ipfs)}
-                    </div>
-                  </td>
-                  <td className="px-6 py-4">
-                    <div className="max-w-xs break-all font-mono text-xs text-slate-300">
-                      {displayValue(item.blockchain)}
-                    </div>
-                  </td>
-                  <td className="px-6 py-4">
-                    <div className={`inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-semibold ${
-                      matched ? 'bg-emerald-500/10 text-emerald-300' : 'bg-red-500/10 text-red-300'
-                    }`}>
-                      {matched ? <CheckCircle2 size={12} /> : <XCircle size={12} />}
-                      <span>{matched ? 'MATCH' : 'MISMATCH'}</span>
-                    </div>
+                  <td><span className="break-anywhere font-mono text-[11.5px] text-ink-muted">{displayValue(item.mongodb)}</span></td>
+                  <td><span className="break-anywhere font-mono text-[11.5px] text-ink-muted">{displayValue(item.ipfs)}</span></td>
+                  <td><span className="break-anywhere font-mono text-[11.5px] text-ink-muted">{displayValue(item.blockchain)}</span></td>
+                  <td>
+                    <span className={matched ? 'badge-success' : 'badge-danger'}>
+                      {matched ? <CheckCircle2 size={11} /> : <XCircle size={11} />}
+                      {matched ? 'Match' : 'Mismatch'}
+                    </span>
                   </td>
                 </tr>
               );

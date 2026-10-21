@@ -37,6 +37,16 @@ export async function markBlockchainFailed(evidenceId, reason) {
   return data;
 }
 
+export async function retryBlockchainRegistration(evidenceId) {
+  const { data } = await apiClient.post(`/evidence/${evidenceId}/retry-blockchain`);
+  return data;
+}
+
+export async function checkWalletBalance(address) {
+  const { data } = await apiClient.get(`/evidence/wallet/${address}/balance`);
+  return data;
+}
+
 export async function downloadEvidence(evidenceId) {
   const response = await apiClient.get(`/evidence/download/${evidenceId}`);
   return response.data;

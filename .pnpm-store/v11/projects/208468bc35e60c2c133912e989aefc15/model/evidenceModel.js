@@ -156,6 +156,7 @@ const evidenceSchema = new Schema({
             'quarantine',
             'rejected',
             'stored_ipfs',
+            'superseded',
             'error'
         ],
         default: 'processing'

@@ -40,7 +40,11 @@ const userSchema = new Schema({
         phone: { type: String, default: '' },
         department: { type: String, default: '' },
         designation: { type: String, default: '' },
-        employeeId: { type: String, default: '' }
+        employeeId: { type: String, default: '' },
+        emailVerified: { type: Boolean, default: false },
+        emailVerifiedAt: { type: Date, default: null },
+        phoneVerified: { type: Boolean, default: false },
+        phoneVerifiedAt: { type: Date, default: null }
     },
     // Employee membership status
     membershipStatus: {

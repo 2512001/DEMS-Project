@@ -15,21 +15,25 @@ const { authorizeRoles } = require('../middleware/roleMiddleware');
 
 const router = express.Router();
 
+// IMPORTANT: Static routes MUST be registered before the dynamic `/:organizationId`
+// routes below. Express matches in registration order, so declaring `/:organizationId`
+// first would capture `/me`, `/overview`, etc. as organization IDs.
+
 // Super Admin only endpoints
 router.get('/directory', protect, authorizeRoles('super_admin'), listOrganizations);
 router.post('/create', protect, authorizeRoles('super_admin'), createOrganization);
 router.post('/assign-admin', protect, authorizeRoles('super_admin'), assignOrganizationAdmin);
 
-// Organization details (super admin and org admin)
-router.get('/:organizationId', protect, getOrganizationDetails);
-router.get('/:organizationId/admins', protect, getOrganizationAdmins);
-
-// Organization Admin endpoints
+// Organization Admin endpoints (static paths)
 router.get('/me', protect, getMyOrganization);
 router.get('/overview', protect, authorizeRoles('admin'), getOrganizationOverview);
 router.put('/settings', protect, authorizeRoles('admin'), updateOrganizationSettings);
 
-// Public endpoints for organization lookup
+// Public endpoints for organization lookup (two-segment path)
 router.get('/resolve/:code', protect, resolveOrganizationByCode);
+
+// Dynamic organization routes — keep LAST so they do not shadow static routes above
+router.get('/:organizationId', protect, getOrganizationDetails);
+router.get('/:organizationId/admins', protect, getOrganizationAdmins);
 
 module.exports = router;

@@ -3,7 +3,7 @@ const mongoose = require('mongoose');
 const User = require('../model/userModel');
 const Organization = require('../model/organizationModel');
 const AuditLog = require('../model/auditLogModel');
-const { requireOrgAdmin } = require('../services/accessControl');
+const { requireOrgAdmin, isAdmin } = require('../services/accessControl');
 const { writeAuditLog } = require('../services/auditService');
 const { ensureAdminOrganization } = require('../services/organizationService');
 

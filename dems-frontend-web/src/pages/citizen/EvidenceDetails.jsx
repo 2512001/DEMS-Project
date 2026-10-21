@@ -1,86 +1,101 @@
 import React, { useEffect, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, Link } from 'react-router-dom';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import Zoom from 'react-medium-image-zoom';
 import 'react-medium-image-zoom/dist/styles.css';
 
 import {
-  FileText,
-  Download,
+  AlertTriangle,
+  ArrowLeft,
+  Building2,
   Calendar,
-  Hash,
-  HardDrive,
+  ChevronDown,
+  Download,
+  FileText,
   Fingerprint,
+  HardDrive,
   Link2,
+  Lock,
   Shield,
-  Clock,
-  FileImage,
-  FileText as FilePdf,
-  CheckCircle2,
-  Copy,
-  XCircle
+  ShieldCheck,
+  User as UserIcon
 } from 'lucide-react';
 
 import HashValue from '../../components/HashValue.jsx';
 import StatusBadge from '../../components/StatusBadge.jsx';
 import VerificationButton from '../../components/verification/VerificationButton.jsx';
 import VerificationResultCard from '../../components/verification/VerificationResultCard.jsx';
-import { formatDate } from '../../utils/format.js';
+import PageHeader from '../../components/ui/PageHeader.jsx';
+import FileTypeIcon from '../../components/ui/FileTypeIcon.jsx';
+import EmptyState from '../../components/ui/EmptyState.jsx';
+import { formatBytes, formatDate, formatRelativeTime } from '../../utils/format.js';
 import { downloadEvidence, verifyEvidenceBlockchain } from '../../api/evidence.js';
 
 const VERIFICATION_LOADING_MESSAGES = [
-  'Verifying evidence integrity...',
-  'Checking blockchain records...',
-  'Comparing hashes...'
+  'Verifying file integrity…',
+  'Checking blockchain records…',
+  'Comparing hashes…'
 ];
 
-function DetailCard({ icon: Icon, label, value, copyable = false }) {
-  const [copied, setCopied] = useState(false);
-
-  const handleCopy = () => {
-    navigator.clipboard.writeText(value);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
-
+function Field({ label, children }) {
   return (
-    <div className="group relative overflow-hidden rounded-xl border border-slate-700/50 bg-gradient-to-br from-slate-800/30 to-slate-900/30 p-4 backdrop-blur-sm transition-all duration-300 hover:border-slate-600/50 hover:shadow-lg">
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <div className="flex items-center justify-center rounded-lg bg-slate-700/50 p-2 transition-all duration-300 group-hover:bg-slate-600/50">
-            <Icon size={16} className="text-slate-400" />
-          </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">{label}</p>
-            <p className="mt-1 text-sm font-medium text-white break-all">{value || 'N/A'}</p>
-          </div>
-        </div>
-
-        {copyable && (
-          <button
-            onClick={handleCopy}
-            className="flex items-center justify-center rounded-lg bg-slate-700/50 p-1.5 transition-all hover:bg-slate-600/50 hover:scale-105"
-            title="Copy"
-          >
-            {copied ? <CheckCircle2 size={14} className="text-emerald-400" /> : <Copy size={14} className="text-slate-400" />}
-          </button>
-        )}
-      </div>
-      <div className="absolute inset-0 bg-gradient-to-r from-slate-500/0 via-slate-500/5 to-slate-500/0 opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
+    <div>
+      <dt className="detail-label">{label}</dt>
+      <dd className="detail-value">{children ?? '—'}</dd>
     </div>
   );
 }
 
-function SectionDivider({ title, icon: Icon }) {
+function TechnicalSection({ title, description, children, defaultOpen = false }) {
+  const [open, setOpen] = useState(defaultOpen);
   return (
-    <div className="flex items-center gap-4 py-4">
-      <div className="flex items-center gap-3">
-        <div className="flex items-center justify-center rounded-lg bg-slate-700/50 p-2">
-          <Icon size={18} className="text-slate-400" />
-        </div>
-        <h3 className="text-lg font-bold text-white">{title}</h3>
+    <div className="rounded-[10px] border border-line">
+      <button
+        type="button"
+        onClick={() => setOpen((current) => !current)}
+        aria-expanded={open}
+        className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left"
+      >
+        <span>
+          <span className="block text-[13px] font-medium text-ink">{title}</span>
+          <span className="mt-0.5 block text-[12px] text-ink-faint">{description}</span>
+        </span>
+        <ChevronDown size={15} className={`shrink-0 text-ink-faint transition ${open ? 'rotate-180' : ''}`} />
+      </button>
+      {open ? <div className="border-t border-line px-4 py-3.5">{children}</div> : null}
+    </div>
+  );
+}
+
+function AiSummary({ analysis }) {
+  if (!analysis?.requested) {
+    return (
+      <p className="text-[13px] text-ink-muted">
+        AI verification was not requested for this file. Authenticity screening is optional.
+      </p>
+    );
+  }
+
+  const flagged = Boolean(analysis.deepfakeDetected || analysis.tamperingDetected);
+  const score = analysis.authenticityScore ?? analysis.score ?? 0;
+
+  return (
+    <div>
+      <div className="flex flex-wrap items-center gap-2">
+        <StatusBadge status={flagged ? 'quarantine' : 'approved'} label={flagged ? 'Flagged for review' : 'Completed'} />
+        <span className="text-[12.5px] text-ink-muted">Authenticity {score}%</span>
       </div>
-      <div className="flex-1 h-px bg-gradient-to-r from-slate-700/50 to-transparent" />
+      {analysis.explanation ? (
+        <p className="mt-2 text-[13px] leading-6 text-ink-muted">{analysis.explanation}</p>
+      ) : null}
+      <dl className="mt-3 grid gap-3 sm:grid-cols-3">
+        <Field label="Tampering score">{analysis.tamperingScore != null ? `${analysis.tamperingScore}%` : '—'}</Field>
+        <Field label="Deepfake score">{analysis.deepfakeScore != null ? `${analysis.deepfakeScore}%` : '—'}</Field>
+        <Field label="Model">{analysis.modelVersion || '—'}</Field>
+      </dl>
+      <p className="mt-3 text-[11.5px] leading-5 text-ink-faint">
+        Automated analysis is a signal, not proof. Combine it with blockchain integrity checks.
+      </p>
     </div>
   );
 }
@@ -98,13 +113,9 @@ export default function EvidenceDetails() {
 
   const verifyMutation = useMutation({
     mutationFn: () => verifyEvidenceBlockchain(evidenceId),
-    onMutate: () => {
-      setVerificationError('');
-    },
+    onMutate: () => setVerificationError(''),
     onError: (err) => {
-      setVerificationError(
-        err.response?.data?.message || err.message || 'Verification request failed.'
-      );
+      setVerificationError(err.response?.data?.message || err.message || 'Verification request failed.');
     }
   });
 
@@ -113,11 +124,9 @@ export default function EvidenceDetails() {
       setLoadingMessageIndex(0);
       return undefined;
     }
-
     const interval = setInterval(() => {
       setLoadingMessageIndex((current) => (current + 1) % VERIFICATION_LOADING_MESSAGES.length);
     }, 2000);
-
     return () => clearInterval(interval);
   }, [verifyMutation.isPending]);
 
@@ -125,13 +134,27 @@ export default function EvidenceDetails() {
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center rounded-2xl border border-slate-700/50 bg-gradient-to-br from-slate-800/30 to-slate-900/30 p-12 backdrop-blur-xl">
-        <div className="text-center">
-          <div className="flex items-center justify-center rounded-2xl bg-slate-800/50 p-4 w-fit mx-auto mb-4">
-            <Clock size={48} className="text-slate-500 animate-spin" />
+      <div className="space-y-5" aria-busy="true">
+        <span className="skeleton h-6 w-40" />
+        <div className="section-card">
+          <div className="flex items-center gap-4">
+            <span className="skeleton h-12 w-12 rounded-[11px]" />
+            <div className="flex-1 space-y-2">
+              <span className="skeleton block h-4 w-1/3" />
+              <span className="skeleton block h-3 w-1/4" />
+            </div>
           </div>
-          <h3 className="text-lg font-semibold text-white mb-2">Loading Evidence</h3>
-          <p className="text-sm text-slate-400">Please wait while we fetch the evidence details</p>
+        </div>
+        <div className="grid gap-5 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
+          <div className="section-card space-y-3">
+            <span className="skeleton block h-3 w-full" />
+            <span className="skeleton block h-3 w-5/6" />
+            <span className="skeleton block h-3 w-2/3" />
+          </div>
+          <div className="section-card space-y-3">
+            <span className="skeleton block h-3 w-full" />
+            <span className="skeleton block h-3 w-3/4" />
+          </div>
         </div>
       </div>
     );
@@ -139,231 +162,284 @@ export default function EvidenceDetails() {
 
   if (error) {
     return (
-      <div className="flex items-center justify-center rounded-2xl border border-red-500/30 bg-gradient-to-br from-red-950/20 to-slate-900/30 p-12 backdrop-blur-xl">
-        <div className="text-center">
-          <div className="flex items-center justify-center rounded-2xl bg-red-500/20 p-4 w-fit mx-auto mb-4">
-            <XCircle size={48} className="text-red-400" />
-          </div>
-          <h3 className="text-lg font-semibold text-red-200 mb-2">Failed to Load Evidence</h3>
-          <p className="text-sm text-red-300/80">An error occurred while fetching the evidence</p>
-        </div>
-      </div>
+      <EmptyState
+        icon={AlertTriangle}
+        title="File could not be loaded"
+        description="The file may have been removed, or you may not have access to it."
+        action={
+          <Link to="/citizen/evidence-vault" className="btn-secondary btn-sm">
+            <ArrowLeft size={14} />
+            Back to files
+          </Link>
+        }
+      />
     );
   }
 
   if (!evidence) {
     return (
-      <div className="flex items-center justify-center rounded-2xl border border-slate-700/50 bg-gradient-to-br from-slate-800/30 to-slate-900/30 p-12 backdrop-blur-xl">
-        <div className="text-center">
-          <div className="flex items-center justify-center rounded-2xl bg-slate-800/50 p-4 w-fit mx-auto mb-4">
-            <FileText size={48} className="text-slate-500" />
-          </div>
-          <h3 className="text-lg font-semibold text-white mb-2">Evidence Not Found</h3>
-          <p className="text-sm text-slate-400">The requested evidence record does not exist</p>
-        </div>
-      </div>
+      <EmptyState
+        icon={FileText}
+        title="File not found"
+        description="This record does not exist or is no longer available."
+        action={
+          <Link to="/citizen/evidence-vault" className="btn-secondary btn-sm">
+            <ArrowLeft size={14} />
+            Back to files
+          </Link>
+        }
+      />
     );
   }
 
   const fileUrl = evidence.fileContent ? `data:${evidence.mimeType};base64,${evidence.fileContent}` : '';
+  const chainStatus = evidence.blockchainStatus || (evidence.blockchainTxHash ? 'confirmed' : 'not_requested');
+  const storageStatus = evidence.storageStatus || (evidence.ipfsCID ? 'ipfs' : 'not_stored');
+  const isPreviewable = Boolean(
+    evidence.fileContent && (evidence.mimeType?.startsWith('image/') || evidence.mimeType === 'application/pdf')
+  );
 
   return (
-    <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
-      {/* Header Section */}
-      <div className="relative overflow-hidden rounded-2xl border border-slate-700/50 bg-gradient-to-br from-slate-800/50 to-slate-900/50 backdrop-blur-xl">
-        <div className="absolute inset-0 bg-gradient-to-r from-sky-500/5 via-transparent to-sky-500/5 opacity-50" />
-        <div className="relative px-8 py-8">
-          <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
-            <div className="flex items-center gap-6">
-              <div className="flex items-center justify-center rounded-2xl bg-gradient-to-br from-sky-500/30 to-sky-600/20 p-4 shadow-lg shadow-sky-500/30">
-                {evidence.mimeType?.startsWith('image/') ? (
-                  <FileImage size={48} className="text-sky-400" />
-                ) : evidence.mimeType === 'application/pdf' ? (
-                  <FilePdf size={48} className="text-sky-400" />
-                ) : (
-                  <FileText size={48} className="text-sky-400" />
-                )}
-              </div>
-              <div>
-                <h1 className="text-3xl font-bold text-white">
-                  {evidence.fileName}
-                </h1>
-                <p className="mt-2 text-base text-slate-400">
-                  Uploaded on {formatDate(evidence.createdAt)}
-                </p>
-              </div>
-            </div>
-
-            <StatusBadge status={evidence.status} />
-          </div>
-        </div>
-      </div>
-
-      {(evidence.fileContent && (evidence.mimeType?.startsWith('image/') || evidence.mimeType === 'application/pdf')) && (
-        <div className="relative overflow-hidden rounded-2xl border border-slate-700/50 bg-gradient-to-br from-slate-800/30 to-slate-900/30 backdrop-blur-xl">
-          <div className="border-b border-slate-700/50 bg-slate-900/30 px-6 py-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                {evidence.mimeType?.startsWith('image/') ? (
-                  <FileImage size={20} className="text-slate-400" />
-                ) : (
-                  <FilePdf size={20} className="text-slate-400" />
-                )}
-                <h3 className="text-lg font-bold text-white">Evidence Preview</h3>
-              </div>
-              <a
-                href={fileUrl}
-                download={evidence.fileName}
-                className="group flex items-center gap-2 rounded-lg border border-sky-500/30 bg-sky-500/10 px-4 py-2 text-sm font-medium text-sky-300 transition-all hover:border-sky-500/50 hover:bg-sky-500/20 hover:shadow-lg hover:shadow-sky-500/20"
-              >
-                <Download size={16} />
+    <div className="space-y-6">
+      <div>
+        <Link
+          to="/citizen/evidence-vault"
+          className="mb-3 inline-flex items-center gap-1.5 text-[12.5px] text-ink-muted transition hover:text-ink"
+        >
+          <ArrowLeft size={13} />
+          My files
+        </Link>
+        <PageHeader
+          title={evidence.fileName}
+          subtitle={`Uploaded ${formatDate(evidence.createdAt)}`}
+          meta={
+            <>
+              <StatusBadge status={evidence.status} />
+              <StatusBadge status={storageStatus} />
+              <StatusBadge status={chainStatus} />
+              <span className="text-[12.5px] text-ink-faint">
+                {evidence.caseId ? `Case ${evidence.caseId}` : 'Personal file'}
+              </span>
+            </>
+          }
+          actions={
+            fileUrl ? (
+              <a href={fileUrl} download={evidence.fileName} className="btn-primary">
+                <Download size={15} />
                 Download
               </a>
-            </div>
-          </div>
-          <div className="p-6">
-            {evidence.mimeType?.startsWith('image/') ? (
-              <Zoom>
-                <img
-                  src={fileUrl}
-                  alt={evidence.fileName}
-                  className="max-h-[700px] w-full cursor-zoom-in rounded-xl object-contain"
-                />
-              </Zoom>
-            ) : (
-              <div className="flex items-center justify-center rounded-xl border border-slate-700/50 bg-slate-800/30 p-12">
-                <div className="text-center">
-                  <FilePdf size={48} className="text-slate-500 mx-auto mb-4" />
-                  <p className="text-sm text-slate-400">PDF preview available on download</p>
+            ) : null
+          }
+        />
+      </div>
+
+      <div className="grid gap-5 xl:grid-cols-[minmax(0,1.45fr)_minmax(0,1fr)]">
+        <div className="space-y-5">
+          {isPreviewable ? (
+            <section className="panel overflow-hidden">
+              <div className="card-header">
+                <div className="flex items-center gap-3">
+                  <FileTypeIcon mimeType={evidence.mimeType} fileName={evidence.fileName} size="sm" />
+                  <div>
+                    <h2 className="section-title">Preview</h2>
+                    <p className="section-subtitle">Decrypted for your session</p>
+                  </div>
                 </div>
               </div>
-            )}
-          </div>
-        </div>
-      )}
+              <div className="bg-[#FAFBFC] p-4">
+                {evidence.mimeType?.startsWith('image/') ? (
+                  <Zoom>
+                    <img
+                      src={fileUrl}
+                      alt={evidence.fileName}
+                      className="mx-auto max-h-[640px] w-full cursor-zoom-in rounded-[9px] object-contain"
+                    />
+                  </Zoom>
+                ) : (
+                  <div className="flex flex-col items-center justify-center rounded-[9px] border border-line bg-card py-14">
+                    <FileText size={28} className="text-ink-faint" />
+                    <p className="mt-3 text-[13px] font-medium text-ink">PDF document</p>
+                    <p className="mt-1 text-[12px] text-ink-muted">Download to view the full document.</p>
+                  </div>
+                )}
+              </div>
+            </section>
+          ) : null}
 
-      {/* Evidence Details */}
-      <div>
-        <SectionDivider title="Evidence Details" icon={FileText} />
-        <div className="grid gap-4 md:grid-cols-2">
-          <DetailCard
-            icon={Hash}
-            label="Evidence ID"
-            value={evidence._id}
-            copyable
-          />
-          <DetailCard
-            icon={Hash}
-            label="Case ID"
-            value={evidence.caseId || 'Personal'}
-          />
-          <DetailCard
-            icon={FileText}
-            label="File Name"
-            value={evidence.fileName}
-          />
-          <DetailCard
-            icon={HardDrive}
-            label="File Type"
-            value={evidence.mimeType}
-          />
-          <DetailCard
-            icon={HardDrive}
-            label="File Size"
-            value={`${(evidence.fileSize / 1024).toFixed(2)} KB`}
-          />
-          <DetailCard
-            icon={Shield}
-            label="Status"
-            value={evidence.status}
-          />
-          <DetailCard
-            icon={Calendar}
-            label="Created At"
-            value={formatDate(evidence.createdAt)}
-          />
-          <DetailCard
-            icon={Link2}
-            label="IPFS CID"
-            value={evidence.ipfsCID}
-            copyable
-          />
-          <DetailCard
-            icon={Fingerprint}
-            label="SHA-256 file hash"
-            value={evidence.fileHash}
-            copyable
-          />
-          <DetailCard
-            icon={Hash}
-            label="Blockchain transaction"
-            value={evidence.blockchainTxHash}
-            copyable
-          />
-        </div>
-      </div>
+          <section className="section-card">
+            <h2 className="section-title">File information</h2>
+            <p className="section-subtitle">What this file is and where it came from</p>
+            <dl className="mt-4 grid gap-4 sm:grid-cols-2">
+              <Field label="File name">{evidence.fileName}</Field>
+              <Field label="Type">{evidence.mimeType}</Field>
+              <Field label="Size">{formatBytes(evidence.fileSize)}</Field>
+              <Field label="Uploaded">
+                <span title={formatDate(evidence.createdAt)}>{formatRelativeTime(evidence.createdAt)}</span>
+              </Field>
+              <Field label="Owner">
+                <span className="inline-flex items-center gap-1.5">
+                  <UserIcon size={13} className="text-ink-faint" />
+                  <HashValue value={evidence.UploaderWallet} compact />
+                </span>
+              </Field>
+              <Field label="Organization">
+                {evidence.organizationId ? (
+                  <span className="inline-flex items-center gap-1.5">
+                    <Building2 size={13} className="text-ink-faint" />
+                    Organization-assigned
+                  </span>
+                ) : (
+                  <span className="text-ink-muted">Personal</span>
+                )}
+              </Field>
+              <Field label="Case ID">{evidence.caseId || <span className="text-ink-muted">Personal file</span>}</Field>
+              <Field label="Version">{evidence.versionNumber ?? 1}</Field>
+            </dl>
+          </section>
 
-      <div>
-        <SectionDivider title="AI Analysis" icon={Shield} />
-        <div className="grid gap-4 md:grid-cols-2">
-          <DetailCard icon={Shield} label="Requested" value={evidence.aiAnalysis?.requested ? 'Yes' : 'No'} />
-          <DetailCard icon={Shield} label="Authenticity" value={`${evidence.aiAnalysis?.authenticityScore ?? evidence.aiAnalysis?.score ?? 'N/A'}`} />
-          <DetailCard icon={Shield} label="Tampering" value={`${evidence.aiAnalysis?.tamperingScore ?? 'N/A'}`} />
-          <DetailCard icon={Shield} label="Deepfake" value={`${evidence.aiAnalysis?.deepfakeScore ?? 'N/A'}`} />
-          <DetailCard icon={Shield} label="Explanation" value={evidence.aiAnalysis?.explanation || 'AI was not requested.'} />
-          <DetailCard icon={Shield} label="Model" value={evidence.aiAnalysis?.modelVersion || 'N/A'} />
+          <section className="section-card">
+            <h2 className="section-title">AI verification</h2>
+            <p className="section-subtitle">Automated authenticity screening, when requested</p>
+            <div className="mt-4">
+              <AiSummary analysis={evidence.aiAnalysis} />
+            </div>
+          </section>
         </div>
-      </div>
 
-      <div>
-        <SectionDivider title="Storage and review" icon={HardDrive} />
-        <div className="grid gap-4 md:grid-cols-2">
-          <DetailCard icon={HardDrive} label="Storage" value={evidence.storageStatus || evidence.status} />
-          <DetailCard icon={Shield} label="Review" value={evidence.reviewStatus || 'not_required'} />
-          <DetailCard icon={Shield} label="Blockchain status" value={evidence.blockchainStatus || (evidence.blockchainTxHash ? 'confirmed' : 'not_requested')} />
-          <DetailCard icon={Hash} label="Uploader" value={evidence.UploaderWallet} copyable />
-        </div>
-      </div>
+        <div className="space-y-5">
+          <section className="section-card">
+            <h2 className="section-title">Protection</h2>
+            <p className="section-subtitle">Three separate guarantees</p>
+            <ul className="mt-4 space-y-3">
+              <li className="flex items-start gap-2.5">
+                <span className="mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-[7px] bg-success-soft text-success">
+                  <Lock size={14} />
+                </span>
+                <div>
+                  <p className="text-[13px] font-medium text-ink">Encryption: enabled</p>
+                  <p className="text-[12px] leading-5 text-ink-faint">
+                    Stored with AES-256-GCM. Encryption is applied by DEMS before storage — IPFS itself does not encrypt content.
+                  </p>
+                </div>
+              </li>
+              <li className="flex items-start gap-2.5">
+                <span className="mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-[7px] bg-brand-soft text-brand">
+                  <HardDrive size={14} />
+                </span>
+                <div>
+                  <p className="text-[13px] font-medium text-ink">
+                    IPFS storage: {evidence.ipfsCID ? 'available' : 'not stored'}
+                  </p>
+                  <p className="text-[12px] leading-5 text-ink-faint">
+                    {evidence.ipfsCID
+                      ? 'Content is retrievable by its content identifier.'
+                      : 'This file has no decentralized storage record.'}
+                  </p>
+                </div>
+              </li>
+              <li className="flex items-start gap-2.5">
+                <span className={`mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-[7px] ${
+                  evidence.blockchainTxHash ? 'bg-success-soft text-success' : 'bg-surface text-ink-muted'
+                }`}>
+                  <ShieldCheck size={14} />
+                </span>
+                <div>
+                  <p className="text-[13px] font-medium text-ink">
+                    Blockchain integrity: {evidence.blockchainTxHash ? 'recorded' : 'not requested'}
+                  </p>
+                  <p className="text-[12px] leading-5 text-ink-faint">
+                    {evidence.blockchainTxHash
+                      ? 'An on-chain hash proves the file has not changed since verification.'
+                      : 'No on-chain proof exists for this file.'}
+                  </p>
+                </div>
+              </li>
+            </ul>
+          </section>
 
-      {/* Blockchain Verification */}
-      <div className="relative overflow-hidden rounded-2xl border border-slate-700/50 bg-gradient-to-br from-slate-800/30 to-slate-900/30 backdrop-blur-xl">
-        <div className="border-b border-slate-700/50 bg-slate-900/30 px-6 py-4">
-          <div className="flex items-center gap-3">
-            <Shield size={20} className="text-slate-400" />
-            <h3 className="text-lg font-bold text-white">Blockchain Integrity Verification</h3>
-          </div>
-        </div>
-        <div className="p-6">
-          <p className="mb-6 text-sm text-slate-400">
-            Verify that this evidence matches its immutable on-chain record by comparing
-            MongoDB metadata, IPFS content, and blockchain proofs.
-          </p>
+          <section className="section-card">
+            <h2 className="section-title">Technical details</h2>
+            <p className="section-subtitle">Identifiers used for verification</p>
+            <div className="mt-3 space-y-2">
+              <TechnicalSection
+                title="File hash"
+                description="SHA-256 of the original file"
+                defaultOpen
+              >
+                <div className="flex items-center gap-2">
+                  <Fingerprint size={13} className="shrink-0 text-ink-faint" />
+                  <HashValue value={evidence.fileHash} compact={false} />
+                </div>
+              </TechnicalSection>
 
-          {evidence.status === 'stored_on_chain' || evidence.blockchainTxHash ? (
-            <VerificationButton
-              onVerify={() => verifyMutation.mutate()}
-              isLoading={verifyMutation.isPending}
-              loadingMessage={VERIFICATION_LOADING_MESSAGES[loadingMessageIndex]}
-            />
-          ) : (
-            <p className="text-sm text-amber-300/80">
-              Blockchain proof was not recorded for this file, so on-chain integrity verification is unavailable.
+              <TechnicalSection title="IPFS content identifier" description="CID of the encrypted blob">
+                {evidence.ipfsCID ? (
+                  <div className="flex items-center gap-2">
+                    <Link2 size={13} className="shrink-0 text-ink-faint" />
+                    <HashValue value={evidence.ipfsCID} compact={false} />
+                  </div>
+                ) : (
+                  <p className="text-[12.5px] text-ink-muted">Not stored on IPFS.</p>
+                )}
+              </TechnicalSection>
+
+              <TechnicalSection title="Blockchain transaction" description="Proof of integrity on the connected network">
+                {evidence.blockchainTxHash ? (
+                  <div className="flex items-center gap-2">
+                    <Shield size={13} className="shrink-0 text-ink-faint" />
+                    <HashValue value={evidence.blockchainTxHash} compact={false} />
+                  </div>
+                ) : (
+                  <p className="text-[12.5px] text-ink-muted">No transaction recorded.</p>
+                )}
+              </TechnicalSection>
+
+              <TechnicalSection title="Record metadata" description="Storage, review and audit fields">
+                <dl className="grid gap-3 sm:grid-cols-2">
+                  <Field label="Record ID"><HashValue value={evidence._id} compact /></Field>
+                  <Field label="Storage status">{storageStatus}</Field>
+                  <Field label="Blockchain status">{chainStatus}</Field>
+                  <Field label="Review status">{evidence.reviewStatus || 'not_required'}</Field>
+                  <Field label="Created">
+                    <span className="inline-flex items-center gap-1.5">
+                      <Calendar size={12} className="text-ink-faint" />
+                      {formatDate(evidence.createdAt)}
+                    </span>
+                  </Field>
+                  <Field label="Encryption method">{evidence.encryptionMethod || 'AES-256'}</Field>
+                </dl>
+              </TechnicalSection>
+            </div>
+          </section>
+
+          <section className="section-card">
+            <h2 className="section-title">Blockchain integrity check</h2>
+            <p className="section-subtitle">
+              Compares stored metadata, IPFS content and the on-chain proof.
             </p>
-          )}
 
-          {verificationError ? (
-            <div className="mt-4 rounded-xl border border-red-500/30 bg-red-950/20 px-4 py-3 text-sm text-red-200">
-              {verificationError}
+            <div className="mt-4">
+              {evidence.status === 'stored_on_chain' || evidence.blockchainTxHash ? (
+                <VerificationButton
+                  onVerify={() => verifyMutation.mutate()}
+                  isLoading={verifyMutation.isPending}
+                  loadingMessage={VERIFICATION_LOADING_MESSAGES[loadingMessageIndex]}
+                />
+              ) : (
+                <p className="alert-warn">
+                  No blockchain proof was recorded for this file, so on-chain verification is unavailable.
+                </p>
+              )}
             </div>
-          ) : null}
 
-          {verifyMutation.data ? (
-            <div className="mt-6">
-              <VerificationResultCard result={verifyMutation.data} />
-            </div>
-          ) : null}
+            {verificationError ? (
+              <div className="alert-danger mt-3" role="alert">{verificationError}</div>
+            ) : null}
+          </section>
         </div>
       </div>
+
+      {verifyMutation.data ? <VerificationResultCard result={verifyMutation.data} /> : null}
     </div>
   );
 }

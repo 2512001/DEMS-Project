@@ -10,6 +10,11 @@ export default function RequireAuth({ roles }) {
     return <Navigate to="/auth/wallet-login" replace state={{ from: location }} />;
   }
 
+  // For email verification route, allow access without role check
+  if (location.pathname === '/auth/email-verification') {
+    return <Outlet />;
+  }
+
   if (roles?.length && role && !roles.includes(role)) {
     return <Navigate to={
       role === 'super_admin' ? '/superadmin/dashboard'

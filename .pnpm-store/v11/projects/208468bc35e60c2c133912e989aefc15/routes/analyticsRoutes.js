@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const mongoose = require('mongoose');
 const User = require('../model/userModel');
 const Organization = require('../model/organizationModel');
 const Invitation = require('../model/invitationModel');
@@ -47,13 +48,17 @@ router.get('/platform', protect, authorizeRoles('super_admin'), async (req, res,
             Evidence.countDocuments({ integrityVerified: false })
         ]);
 
-        // Get recent security events
+        // Get recent security-relevant events (uses real stored action names /
+        // result flags — not the previous UPPERCASE names that never matched).
         const recentSecurityEvents = await AuditLog.find({
-            action: { $in: ['LOGIN_FAILED', 'INVITATION_EXPIRED', 'INTEGRITY_FAILED', 'SECURITY_ALERT'] }
+            $or: [
+                { result: { $ne: 'success' } },
+                { action: { $in: ['quarantine', 'blockchain_failure', 'employee_rejection'] } }
+            ]
         })
         .sort({ createdAt: -1 })
         .limit(10)
-        .select('action actorId actorWallet metadata createdAt');
+        .select('action actorId actorWallet result reason metadata createdAt');
 
         // Get user growth over time (last 30 days)
         const thirtyDaysAgo = new Date();
@@ -152,7 +157,7 @@ router.get('/organization', protect, async (req, res, next) => {
             integrityVerifiedEvidence
         ] = await Promise.all([
             User.countDocuments({ organizationId, role: 'officer' }),
-            User.countDocuments({ organizationId, membershipStatus: 'pending' }),
+            User.countDocuments({ organizationId, membershipStatus: 'pending_approval' }),
             User.countDocuments({ organizationId, membershipStatus: 'active' }),
             User.countDocuments({ organizationId, membershipStatus: 'rejected' }),
             Evidence.countDocuments({ organizationId }),
@@ -163,9 +168,11 @@ router.get('/organization', protect, async (req, res, next) => {
             Evidence.countDocuments({ organizationId, integrityVerified: true })
         ]);
 
-        // Get department-wise evidence (if departments are used)
+        // Get department-wise evidence (if departments are used).
+        // Aggregation does not auto-cast the string organizationId to ObjectId, so cast explicitly.
+        const orgObjectId = new mongoose.Types.ObjectId(organizationId);
         const departmentEvidence = await Evidence.aggregate([
-            { $match: { organizationId } },
+            { $match: { organizationId: orgObjectId } },
             {
                 $group: {
                     _id: '$department',
@@ -174,14 +181,14 @@ router.get('/organization', protect, async (req, res, next) => {
             }
         ]);
 
-        // Get recent activity
+        // Get recent organization activity using real stored action names.
         const recentActivity = await AuditLog.find({
             organizationId,
-            action: { $in: ['EVIDENCE_UPLOADED', 'EVIDENCE_QUARANTINED', 'APPLICATION_APPROVED', 'APPLICATION_REJECTED'] }
+            action: { $in: ['upload', 'ipfs_storage', 'quarantine', 'membership_application_review', 'employee_approval', 'employee_rejection', 'blockchain_transaction', 'evidence_access'] }
         })
         .sort({ createdAt: -1 })
         .limit(10)
-        .select('action actor metadata createdAt');
+        .select('action actorId actorWallet result metadata createdAt');
 
         res.status(200).json({
             success: true,

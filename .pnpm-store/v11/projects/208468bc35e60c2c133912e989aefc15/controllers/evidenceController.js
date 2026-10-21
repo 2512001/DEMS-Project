@@ -1,4 +1,5 @@
 const fs = require('fs');
+const { ethers } = require('ethers');
 const EvidenceModel = require('../model/evidenceModel');
 const QuarantineEvidence = require('../model/quarantineEvidenceModel');
 const { decryptFile } = require('../services/cryptoService');
@@ -164,6 +165,15 @@ const getEvidenceById = async (req, res, next) => {
             return res.status(403).json({ success: false, message: 'You are not authorized to access this evidence.' });
         }
 
+        console.log('[Backend Evidence Diagnostics]', {
+            evidenceId: evidence._id.toString(),
+            uploaderWallet: evidence.UploaderWallet,
+            authenticatedWallet: req.user.walletAddress,
+            blockchainStatus: evidence.blockchainStatus,
+            blockchainRequested: evidence.blockchainRequested,
+            ipfsCID: evidence.ipfsCID
+        });
+
         let fileContent = null;
         if (evidence.ipfsCID && evidence.encryption?.iv && evidence.encryption?.authTag) {
             try {
@@ -188,13 +198,20 @@ const getEvidenceById = async (req, res, next) => {
         const evidencePayload = evidence.toObject();
         delete evidencePayload.encryption;
 
+        const payload = blockchainPayload(evidence);
+        console.log('[Backend Evidence Diagnostics] Blockchain payload:', {
+            hasPayload: !!payload,
+            payloadUploader: payload?.uploaderWallet,
+            payloadEvidenceId: payload?.evidenceId
+        });
+
         return res.status(200).json({
             success: true,
             data: {
                 ...evidencePayload,
                 fileContent,
-                blockchainPayload: evidence.blockchainStatus === 'pending' && evidence.ipfsCID
-                    ? blockchainPayload(evidence)
+                blockchainPayload: (evidence.blockchainStatus === 'pending' || evidence.blockchainStatus === 'failed') && evidence.ipfsCID
+                    ? payload
                     : null
             }
         });
@@ -344,6 +361,99 @@ const markBlockchainFailed = async (req, res, next) => {
     }
 };
 
+const retryBlockchainRegistration = async (req, res, next) => {
+    try {
+        const evidence = await EvidenceModel.findById(req.params.evidenceId);
+        if (!evidence) {
+            return res.status(404).json({ success: false, message: 'Evidence record not found.' });
+        }
+        if (!isEvidenceOwner(req.user, evidence)) {
+            return res.status(403).json({ success: false, message: 'Only the original uploader wallet can retry blockchain proof.' });
+        }
+        if (!evidence.blockchainRequested || evidence.blockchainStatus !== 'failed') {
+            return res.status(409).json({ success: false, message: 'This evidence is not eligible for blockchain retry.' });
+        }
+        if (!evidence.ipfsCID) {
+            return res.status(409).json({ success: false, message: 'IPFS CID is missing. Cannot retry blockchain registration.' });
+        }
+
+        evidence.blockchainStatus = 'pending';
+        evidence.status = 'pending_blockchain';
+        evidence.statusMessage = 'Retrying blockchain proof registration.';
+        await evidence.save();
+
+        await writeAuditLog({
+            actor: req.user,
+            organizationId: evidence.organizationId,
+            action: 'blockchain_retry',
+            targetType: 'evidence',
+            targetId: evidence._id
+        });
+
+        const payload = evidence.toObject();
+        delete payload.encryption;
+
+        return res.status(200).json({
+            success: true,
+            message: 'Blockchain registration retry initiated.',
+            data: {
+                ...payload,
+                blockchainPayload: blockchainPayload(evidence)
+            }
+        });
+    } catch (err) {
+        next(err);
+    }
+};
+
+const checkWalletBalance = async (req, res, next) => {
+    try {
+        const { address } = req.params;
+        if (!address || !ethers.isAddress(address)) {
+            return res.status(400).json({ success: false, message: 'Valid wallet address is required.' });
+        }
+
+        const { rpcUrl } = require('../services/blockchainService').getContractConfig();
+
+        const provider = new ethers.JsonRpcProvider(rpcUrl);
+        const balance = await provider.getBalance(address);
+        const network = await provider.getNetwork();
+
+        console.log('[Backend Wallet Balance Check]', {
+            address,
+            balance: ethers.formatEther(balance),
+            balanceRaw: balance.toString(),
+            chainId: Number(network.chainId),
+            rpcUrl
+        });
+
+        return res.status(200).json({
+            success: true,
+            data: {
+                address,
+                balance: ethers.formatEther(balance),
+                balanceRaw: balance.toString(),
+                chainId: Number(network.chainId),
+                rpcUrl
+            }
+        });
+    } catch (err) {
+        console.error('[Backend Wallet Balance Check Error]', err);
+        if (err.code === 'NETWORK_ERROR' || err.code === 'TIMEOUT' || err.code === 'SERVER_ERROR') {
+            return res.status(503).json({
+                success: false,
+                message: 'Cannot reach blockchain RPC. Ensure Hardhat node is running.',
+                error: err.message
+            });
+        }
+        return res.status(500).json({
+            success: false,
+            message: 'Failed to check wallet balance.',
+            error: err.message
+        });
+    }
+};
+
 module.exports = {
     getEvidenceById,
     uploadEvidence,
@@ -352,5 +462,7 @@ module.exports = {
     finalizeEvidence,
     getUploadPolicy,
     getOrganizationEvidence,
-    markBlockchainFailed
+    markBlockchainFailed,
+    retryBlockchainRegistration,
+    checkWalletBalance
 };

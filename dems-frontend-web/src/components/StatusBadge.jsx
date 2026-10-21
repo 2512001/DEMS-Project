@@ -1,133 +1,83 @@
 import React from 'react';
-import { Lock, Clock, ShieldCheck, CheckCircle2, XCircle, AlertCircle } from 'lucide-react';
+import {
+  AlertCircle,
+  AlertTriangle,
+  BadgeCheck,
+  CheckCircle2,
+  Clock,
+  Database,
+  Lock,
+  MinusCircle,
+  ShieldCheck,
+  XCircle
+} from 'lucide-react';
 
-const STATUS_CONFIG = {
-  encrypted: {
-    icon: Lock,
-    gradient: 'from-sky-500/20 to-sky-600/10',
-    border: 'border-sky-500/30',
-    text: 'text-sky-300',
-    iconBg: 'bg-sky-500/20',
-    iconColor: 'text-sky-400'
-  },
-  pending_blockchain: {
-    icon: Clock,
-    gradient: 'from-amber-500/20 to-amber-600/10',
-    border: 'border-amber-500/30',
-    text: 'text-amber-300',
-    iconBg: 'bg-amber-500/20',
-    iconColor: 'text-amber-400'
-  },
-  stored_ipfs: {
-    icon: Lock,
-    gradient: 'from-sky-500/20 to-sky-600/10',
-    border: 'border-sky-500/30',
-    text: 'text-sky-300',
-    iconBg: 'bg-sky-500/20',
-    iconColor: 'text-sky-400'
-  },
-  quarantine: {
-    icon: AlertCircle,
-    gradient: 'from-amber-500/20 to-amber-600/10',
-    border: 'border-amber-500/30',
-    text: 'text-amber-300',
-    iconBg: 'bg-amber-500/20',
-    iconColor: 'text-amber-400'
-  },
-  pending_review: {
-    icon: Clock,
-    gradient: 'from-amber-500/20 to-amber-600/10',
-    border: 'border-amber-500/30',
-    text: 'text-amber-300',
-    iconBg: 'bg-amber-500/20',
-    iconColor: 'text-amber-400'
-  },
-  stored_on_chain: {
-    icon: ShieldCheck,
-    gradient: 'from-emerald-500/20 to-emerald-600/10',
-    border: 'border-emerald-500/30',
-    text: 'text-emerald-300',
-    iconBg: 'bg-emerald-500/20',
-    iconColor: 'text-emerald-400'
-  },
-  pending: {
-    icon: Clock,
-    gradient: 'from-amber-500/20 to-amber-600/10',
-    border: 'border-amber-500/30',
-    text: 'text-amber-300',
-    iconBg: 'bg-amber-500/20',
-    iconColor: 'text-amber-400'
-  },
-  approved: {
-    icon: CheckCircle2,
-    gradient: 'from-emerald-500/20 to-emerald-600/10',
-    border: 'border-emerald-500/30',
-    text: 'text-emerald-300',
-    iconBg: 'bg-emerald-500/20',
-    iconColor: 'text-emerald-400'
-  },
-  rejected: {
-    icon: XCircle,
-    gradient: 'from-red-500/20 to-red-600/10',
-    border: 'border-red-500/30',
-    text: 'text-red-300',
-    iconBg: 'bg-red-500/20',
-    iconColor: 'text-red-400'
-  },
-  none: {
-    icon: Clock,
-    gradient: 'from-slate-500/20 to-slate-600/10',
-    border: 'border-slate-500/30',
-    text: 'text-slate-300',
-    iconBg: 'bg-slate-500/20',
-    iconColor: 'text-slate-400'
-  },
-  not_required: {
-    icon: CheckCircle2,
-    gradient: 'from-slate-500/20 to-slate-600/10',
-    border: 'border-slate-500/30',
-    text: 'text-slate-300',
-    iconBg: 'bg-slate-500/20',
-    iconColor: 'text-slate-400'
-  },
-  not_requested: {
-    icon: Clock,
-    gradient: 'from-slate-500/20 to-slate-600/10',
-    border: 'border-slate-500/30',
-    text: 'text-slate-300',
-    iconBg: 'bg-slate-500/20',
-    iconColor: 'text-slate-400'
-  },
-  error: {
-    icon: AlertCircle,
-    gradient: 'from-red-500/20 to-red-600/10',
-    border: 'border-red-500/30',
-    text: 'text-red-300',
-    iconBg: 'bg-red-500/20',
-    iconColor: 'text-red-400'
-  },
-  failed: {
-    icon: XCircle,
-    gradient: 'from-red-500/20 to-red-600/10',
-    border: 'border-red-500/30',
-    text: 'text-red-300',
-    iconBg: 'bg-red-500/20',
-    iconColor: 'text-red-400'
-  }
+const BRAND = 'inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border border-[#d5e2fb] bg-brand-soft px-2 py-0.5 text-[11.5px] font-medium leading-5 text-brand';
+const SUCCESS = 'inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border border-[#c7e9dd] bg-success-soft px-2 py-0.5 text-[11.5px] font-medium leading-5 text-success';
+const WARN = 'inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border border-[#f0dfbd] bg-warn-soft px-2 py-0.5 text-[11.5px] font-medium leading-5 text-warn';
+const DANGER = 'inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border border-[#f4caca] bg-danger-soft px-2 py-0.5 text-[11.5px] font-medium leading-5 text-danger';
+const NEUTRAL = 'inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border border-line bg-surface px-2 py-0.5 text-[11.5px] font-medium leading-5 text-ink-muted';
+
+/**
+ * One vocabulary for every status the API returns. Values map to the same
+ * semantic tones used across the product: success = verified, warn = pending,
+ * danger = failure, brand = active work, neutral = nothing requested.
+ */
+const STATUS_MAP = {
+  stored_on_chain: { label: 'Blockchain verified', tone: SUCCESS, Icon: ShieldCheck },
+  stored_ipfs: { label: 'Stored on IPFS', tone: SUCCESS, Icon: Database },
+  encrypted: { label: 'Encrypted', tone: BRAND, Icon: Lock },
+  confirmed: { label: 'Confirmed', tone: SUCCESS, Icon: CheckCircle2 },
+  verified: { label: 'Verified', tone: SUCCESS, Icon: ShieldCheck },
+  approved: { label: 'Approved', tone: SUCCESS, Icon: CheckCircle2 },
+  active: { label: 'Active', tone: SUCCESS, Icon: CheckCircle2 },
+  complete: { label: 'Complete', tone: SUCCESS, Icon: CheckCircle2 },
+  ipfs: { label: 'IPFS stored', tone: SUCCESS, Icon: Database },
+  pending_blockchain: { label: 'Blockchain pending', tone: WARN, Icon: Clock },
+  pending_review: { label: 'Pending review', tone: WARN, Icon: Clock },
+  pending_approval: { label: 'Pending approval', tone: WARN, Icon: Clock },
+  pending: { label: 'Pending', tone: WARN, Icon: Clock },
+  processing: { label: 'Processing', tone: BRAND, Icon: Clock },
+  quarantine: { label: 'In quarantine', tone: WARN, Icon: AlertTriangle },
+  quarantined: { label: 'Quarantined', tone: WARN, Icon: AlertTriangle },
+  rejected: { label: 'Rejected', tone: DANGER, Icon: XCircle },
+  failed: { label: 'Failed', tone: DANGER, Icon: XCircle },
+  error: { label: 'Error', tone: DANGER, Icon: AlertCircle },
+  suspended: { label: 'Suspended', tone: DANGER, Icon: XCircle },
+  none: { label: 'Not verified', tone: NEUTRAL, Icon: MinusCircle },
+  not_required: { label: 'Not required', tone: NEUTRAL, Icon: MinusCircle },
+  not_requested: { label: 'Not requested', tone: NEUTRAL, Icon: MinusCircle },
+  not_stored: { label: 'Not stored', tone: NEUTRAL, Icon: MinusCircle },
+  unverified: { label: 'Unverified', tone: NEUTRAL, Icon: MinusCircle }
 };
 
-export default function StatusBadge({ status = 'pending' }) {
-  const config = STATUS_CONFIG[status] || STATUS_CONFIG.pending;
-  const Icon = config.icon;
+export default function StatusBadge({ status = 'pending', label, className = '' }) {
+  const key = String(status || 'pending').toLowerCase();
+  const config = STATUS_MAP[key] || {
+    label: String(status || 'Unknown').replaceAll('_', ' '),
+    tone: NEUTRAL,
+    Icon: BadgeCheck
+  };
+  const Icon = config.Icon;
 
   return (
-    <div className={`inline-flex items-center gap-2 rounded-full border ${config.border} bg-gradient-to-r ${config.gradient} px-4 py-2 shadow-lg backdrop-blur-sm transition-all duration-300 hover:shadow-xl hover:scale-105`}>
-      <div className={`flex items-center justify-center rounded-full ${config.iconBg} p-1`}>
-        <Icon size={14} className={config.iconColor} />
-      </div>
-      <span className={`text-sm font-semibold tracking-wide ${config.text}`}>
-        {String(status).replaceAll('_', ' ')}
-      </span>
-    </div>
+    <span
+      className={`${config.tone} ${className}`}
+      title={label || config.label}
+    >
+      <Icon size={11} strokeWidth={2.2} aria-hidden="true" />
+      <span className="capitalize">{label || config.label}</span>
+    </span>
   );
+}
+
+export function toneForStatus(status = '') {
+  const key = String(status).toLowerCase();
+  const config = STATUS_MAP[key];
+  if (!config) return 'neutral';
+  if (config.tone === SUCCESS) return 'success';
+  if (config.tone === WARN) return 'warn';
+  if (config.tone === DANGER) return 'danger';
+  if (config.tone === BRAND) return 'brand';
+  return 'neutral';
 }

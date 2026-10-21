@@ -1,32 +1,24 @@
-Node.js
-
+# Dependencies
 node_modules/
-npm-debug.log
+npm-debug.log*
 
+# Environment & secrets — NEVER commit real credentials
+.env
+.env.*
+!.env.example
 
-Python
-
-pycache/
-*.py[cod]
-*$py.class
-v/
-env/
-.
-
-Blockchain / Hardhat
-
-artifacts/
-cache/
-coverage/
-coverage.json
-
-OS generated files
-
-.DS_Store
-Thumbs.db
-
+# Uploads & local evidence stores
 uploads/
 quarantine-store/
 
+# Build output
 build/
 dist/
+
+# Logs & runtime
+*.log
+*.pid
+
+# OS generated files
+.DS_Store
+Thumbs.db

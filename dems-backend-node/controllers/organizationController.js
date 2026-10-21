@@ -2,10 +2,11 @@ const Organization = require('../model/organizationModel');
 const User = require('../model/userModel');
 const Evidence = require('../model/evidenceModel');
 const QuarantineEvidence = require('../model/quarantineEvidenceModel');
-const { generateOrganizationCode } = require('../services/organizationService');
+const { generateOrganizationCode, ensureAdminOrganization } = require('../services/organizationService');
 const { requireOrgAdmin, isAdmin, isSuperAdmin } = require('../services/accessControl');
 const { parseBoolean } = require('../services/evidencePipelineService');
 const { writeAuditLog } = require('../services/auditService');
+const { createAdminInvitation: createAdminInvitationRecord } = require('../services/invitationService');
 
 const listOrganizations = async (req, res, next) => {
     try {
@@ -98,81 +99,18 @@ const assignOrganizationAdmin = async (req, res, next) => {
         }
 
         const { organizationId, invitedEmail, invitedName } = req.body;
-        
+
         if (!organizationId || !invitedEmail || !invitedName) {
             return res.status(400).json({ success: false, message: 'Organization ID, email, and name are required.' });
         }
 
-        const organization = await Organization.findById(organizationId);
-        if (!organization) {
-            return res.status(404).json({ success: false, message: 'Organization not found.' });
-        }
-
-        // Use invitation system instead of direct assignment
-        const Invitation = require('../model/invitationModel');
-        const { sendAdminInvitationEmail } = require('../services/emailService');
-
-        // Check for existing pending invitation
-        const existingInvitation = await Invitation.findOne({
+        // Delegate to the shared invitation workflow (single source of truth).
+        const { invitation, emailResult } = await createAdminInvitationRecord({
             organizationId,
-            invitedEmail: invitedEmail.toLowerCase(),
-            invitationType: 'organization_admin',
-            status: 'pending'
-        });
-
-        if (existingInvitation) {
-            return res.status(409).json({ 
-                success: false, 
-                message: 'A pending invitation already exists for this email.' 
-            });
-        }
-
-        // Create invitation
-        const expiresAt = new Date();
-        expiresAt.setDate(expiresAt.getDate() + 7);
-
-        const invitation = await Invitation.create({
-            organizationId,
-            invitedEmail: invitedEmail.toLowerCase(),
-            invitedName: invitedName.trim(),
-            invitationType: 'organization_admin',
+            invitedEmail,
+            invitedName,
             invitedBy: req.user.id,
-            expiresAt
-        });
-
-        console.log('[ASSIGN-ADMIN] Sending invitation email to:', invitation.invitedEmail);
-        console.log('[ASSIGN-ADMIN] Organization:', organization.name);
-        console.log('[ASSIGN-ADMIN] Invitation ID:', invitation._id);
-        console.log('[ASSIGN-ADMIN] Token:', invitation.token);
-
-        const emailResult = await sendAdminInvitationEmail(invitation, organization);
-
-        console.log('[ASSIGN-ADMIN] Email result:', {
-            success: emailResult?.success,
-            status: emailResult?.status,
-            code: emailResult?.code,
-            messageId: emailResult?.messageId || null,
-            error: emailResult?.error || null
-        });
-
-        await Invitation.findByIdAndUpdate(invitation._id, {
-            emailStatus: emailResult.status,
-            emailSentAt: emailResult.status === 'sent' ? new Date() : null,
-            emailMessageId: emailResult.messageId || null,
-            emailError: emailResult.error || null
-        });
-
-        await writeAuditLog({
-            actor: req.user,
-            organizationId: organization._id,
-            action: 'admin_invitation_created',
-            targetType: 'invitation',
-            targetId: invitation._id,
-            metadata: {
-                invitedEmail: invitation.invitedEmail,
-                emailStatus: emailResult.status,
-                emailSent: emailResult.success
-            }
+            actor: req.user
         });
 
         if (!emailResult.success) {
@@ -202,6 +140,9 @@ const assignOrganizationAdmin = async (req, res, next) => {
             }
         });
     } catch (err) {
+        if (err.statusCode) {
+            return res.status(err.statusCode).json({ success: false, message: err.message });
+        }
         next(err);
     }
 };

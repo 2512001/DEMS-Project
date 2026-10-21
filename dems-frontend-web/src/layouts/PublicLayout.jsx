@@ -1,28 +1,94 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Link, NavLink, Outlet } from 'react-router-dom';
-import { ShieldCheck } from 'lucide-react';
+import { Menu, X } from 'lucide-react';
+import BrandMark from '../components/ui/BrandMark.jsx';
 import ErrorBoundary from '../components/ErrorBoundary.jsx';
 
+const LINKS = [
+  { to: '/public/features', label: 'Capabilities' },
+  { to: '/public/about', label: 'About' }
+];
+
 export default function PublicLayout() {
+  const [open, setOpen] = useState(false);
+
   return (
-    <div className="vault-shell">
-      <div className="vault-bg" />
-      <div className="relative z-10 mx-auto flex min-h-screen max-w-7xl flex-col px-5 py-5">
-        <header className="flex items-center justify-between border-b border-slate-800 pb-4">
-          <Link to="/" className="flex items-center gap-3 text-slate-100">
-            <span className="grid h-10 w-10 place-items-center border border-sky-400/50 bg-sky-400/10 text-sky-200"><ShieldCheck size={22} /></span>
-            <span className="font-extrabold tracking-wide">DEMS</span>
+    <div className="flex min-h-screen flex-col bg-canvas">
+      <header className="sticky top-0 z-40 border-b border-line bg-card/90 backdrop-blur">
+        <div className="mx-auto flex h-16 w-full max-w-6xl items-center justify-between gap-4 px-5">
+          <Link to="/" aria-label="DEMS home">
+            <BrandMark />
           </Link>
-          <nav className="flex items-center gap-2 text-sm">
-            <NavLink className="nav-link" to="/public/about">About</NavLink>
-            <NavLink className="nav-link" to="/public/features">Features</NavLink>
-            <Link className="btn-primary" to="/auth/wallet-login">Connect Wallet</Link>
+
+          <nav className="hidden items-center gap-1 md:flex" aria-label="Public navigation">
+            {LINKS.map((link) => (
+              <NavLink
+                key={link.to}
+                to={link.to}
+                className={({ isActive }) =>
+                  `rounded-[7px] px-3 py-2 text-[13px] font-medium transition ${
+                    isActive ? 'bg-brand-soft text-brand' : 'text-ink-muted hover:bg-surface hover:text-ink'
+                  }`
+                }
+              >
+                {link.label}
+              </NavLink>
+            ))}
+            <Link to="/auth/wallet-login" className="btn-primary ml-2">
+              Sign in
+            </Link>
           </nav>
-        </header>
+
+          <button
+            type="button"
+            className="icon-btn md:hidden"
+            onClick={() => setOpen((current) => !current)}
+            aria-label={open ? 'Close menu' : 'Open menu'}
+            aria-expanded={open}
+          >
+            {open ? <X size={18} /> : <Menu size={18} />}
+          </button>
+        </div>
+
+        {open ? (
+          <div className="border-t border-line bg-card px-5 py-3 md:hidden">
+            <nav className="grid gap-1" aria-label="Public navigation">
+              {LINKS.map((link) => (
+                <NavLink
+                  key={link.to}
+                  to={link.to}
+                  onClick={() => setOpen(false)}
+                  className={({ isActive }) =>
+                    `rounded-[7px] px-3 py-2 text-[13.5px] font-medium ${
+                      isActive ? 'bg-brand-soft text-brand' : 'text-ink-muted'
+                    }`
+                  }
+                >
+                  {link.label}
+                </NavLink>
+              ))}
+              <Link to="/auth/wallet-login" className="btn-primary mt-2" onClick={() => setOpen(false)}>
+                Sign in
+              </Link>
+            </nav>
+          </div>
+        ) : null}
+      </header>
+
+      <main className="mx-auto w-full max-w-6xl flex-1 px-5">
         <ErrorBoundary>
           <Outlet />
         </ErrorBoundary>
-      </div>
+      </main>
+
+      <footer className="border-t border-line bg-card">
+        <div className="mx-auto flex w-full max-w-6xl flex-col gap-3 px-5 py-6 sm:flex-row sm:items-center sm:justify-between">
+          <BrandMark size="sm" />
+          <p className="text-[12px] text-ink-faint">
+            Encrypted storage · Decentralized · Independently verifiable
+          </p>
+        </div>
+      </footer>
     </div>
   );
 }

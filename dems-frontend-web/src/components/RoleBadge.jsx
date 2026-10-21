@@ -1,57 +1,52 @@
 import React from 'react';
-import { BadgeCheck, Shield, ShieldCheck, Crown } from 'lucide-react';
+import { BadgeCheck, Crown, Shield, ShieldCheck } from 'lucide-react';
 
 const ROLE_CONFIG = {
   super_admin: {
-    icon: Crown,
-    gradient: 'from-amber-500/20 to-amber-600/10',
-    border: 'border-amber-500/30',
-    text: 'text-amber-300',
-    iconBg: 'bg-amber-500/20',
-    iconColor: 'text-amber-400',
-    label: 'Super Admin'
+    label: 'Super Admin',
+    Icon: Crown,
+    tone: 'text-warn',
+    bg: 'bg-warn-soft',
+    ring: 'border-[#f0dfbd]'
   },
   admin: {
-    icon: ShieldCheck,
-    gradient: 'from-emerald-500/20 to-emerald-600/10',
-    border: 'border-emerald-500/30',
-    text: 'text-emerald-300',
-    iconBg: 'bg-emerald-500/20',
-    iconColor: 'text-emerald-400',
-    label: 'Org Admin'
+    label: 'Org Admin',
+    Icon: ShieldCheck,
+    tone: 'text-brand',
+    bg: 'bg-brand-soft',
+    ring: 'border-[#d5e2fb]'
   },
   officer: {
-    icon: BadgeCheck,
-    gradient: 'from-sky-500/20 to-sky-600/10',
-    border: 'border-sky-500/30',
-    text: 'text-sky-300',
-    iconBg: 'bg-sky-500/20',
-    iconColor: 'text-sky-400',
-    label: 'Employee'
+    label: 'Employee',
+    Icon: BadgeCheck,
+    tone: 'text-success',
+    bg: 'bg-success-soft',
+    ring: 'border-[#c7e9dd]'
   },
   citizen: {
-    icon: Shield,
-    gradient: 'from-slate-500/20 to-slate-600/10',
-    border: 'border-slate-500/30',
-    text: 'text-slate-300',
-    iconBg: 'bg-slate-500/20',
-    iconColor: 'text-slate-400',
-    label: 'User'
+    label: 'User',
+    Icon: Shield,
+    tone: 'text-ink-muted',
+    bg: 'bg-surface',
+    ring: 'border-line'
   }
 };
 
-export default function RoleBadge({ role = 'citizen' }) {
+export default function RoleBadge({ role = 'citizen', compact = false }) {
   const config = ROLE_CONFIG[role] || ROLE_CONFIG.citizen;
-  const Icon = config.icon;
+  const Icon = config.Icon;
 
   return (
-    <div className={`inline-flex items-center gap-2 rounded-full border ${config.border} bg-gradient-to-r ${config.gradient} px-4 py-2 shadow-lg backdrop-blur-sm transition-all duration-300 hover:shadow-xl hover:scale-105`}>
-      <div className={`flex items-center justify-center rounded-full ${config.iconBg} p-1`}>
-        <Icon size={14} className={config.iconColor} />
-      </div>
-      <span className={`text-sm font-semibold tracking-wide ${config.text}`}>
-        {config.label}
-      </span>
-    </div>
+    <span
+      className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-2 py-0.5 text-[11.5px] font-medium leading-5 ${config.ring} ${config.bg} ${config.tone}`}
+    >
+      <Icon size={11} strokeWidth={2.2} aria-hidden="true" />
+      {compact ? null : config.label}
+      {compact ? <span className="sr-only">{config.label}</span> : null}
+    </span>
   );
+}
+
+export function roleLabel(role) {
+  return (ROLE_CONFIG[role] || ROLE_CONFIG.citizen).label;
 }

@@ -1,2 +1,21 @@
+# Dependencies
 node_modules/
 
+# Environment & secrets — NEVER commit real credentials
+.env
+.env.*
+!.env.example
+
+# Hardhat / build artifacts
+artifacts/
+cache/
+typechain-types/
+coverage/
+coverage.json
+
+# Logs
+*.log
+
+# OS generated files
+.DS_Store
+Thumbs.db

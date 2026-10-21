@@ -88,20 +88,25 @@ export function AuthProvider({ children }) {
   }, [logout, user?.walletAddress]);
 
   useEffect(() => {
-    if (!token) return;
-    getMe()
-      .then((freshUser) => {
-        if (!freshUser) return;
-        console.log('[AUTH] /me response - role:', freshUser.role, 'organizationId:', freshUser.organizationId);
-        setUser(freshUser);
-      })
-      .catch((error) => {
-        console.error('[AUTH] /me failed:', error);
-        if (error.response?.status === 401) {
-          logout();
-        }
-      });
-  }, [token, logout]);
+    let mounted = true;
+    // Only call getMe to refresh user data, not immediately after login
+    // The initial user data comes from wallet authentication response
+    if (token && user && !user.profile) {
+      getMe()
+        .then((freshUser) => {
+          if (!mounted) return;
+          console.log('[AUTH] /me response - role:', freshUser.role, 'organizationId:', freshUser.organizationId);
+          setUser(freshUser);
+        })
+        .catch((error) => {
+          console.error('[AUTH] /me failed:', error);
+          if (error.response?.status === 401) {
+            logout();
+          }
+        });
+    }
+    return () => { mounted = false; };
+  }, [token, user, logout]);
 
   const loginWithWallet = useCallback(async () => {
     setAuthStatus('connecting');
@@ -138,7 +143,7 @@ export function AuthProvider({ children }) {
       setChainId(REQUIRED_CHAIN_HEX);
       setAuthStatus('authenticated');
       
-      console.log('[AUTH] Step 8: Authentication complete, role:', verified.user.role);
+      console.log('[AUTH] Step 8: Authentication complete, role:', verified.user.role, 'emailVerified:', verified.user.profile?.emailVerified);
       console.log('[AUTH] Final auth state - token:', !!verified.token, 'user:', !!verified.user, 'role:', verified.user.role);
       
       // Return immediately after setting state

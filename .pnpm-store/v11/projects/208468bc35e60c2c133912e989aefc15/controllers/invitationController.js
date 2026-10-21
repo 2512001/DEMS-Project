@@ -2,10 +2,11 @@ const Invitation = require('../model/invitationModel');
 const User = require('../model/userModel');
 const Organization = require('../model/organizationModel');
 const {
-    sendAdminInvitationEmail,
     sendEmployeeInvitationEmail,
     sendEmployeeApplicationSubmittedEmail
 } = require('../services/emailService');
+const { createAdminInvitation: createAdminInvitationRecord } = require('../services/invitationService');
+const { isEmailVerified } = require('../services/otpService');
 const { httpError } = require('../services/accessControl');
 
 function normalizeEmail(value) {
@@ -74,51 +75,13 @@ function publicOrganization(organization) {
 async function createAdminInvitation(req, res, next) {
     try {
         const { organizationId, invitedEmail, invitedName } = req.body;
-        const organization = await Organization.findById(organizationId);
-        if (!organization) {
-            throw httpError(404, 'Organization not found');
-        }
-
-        const email = normalizeEmail(invitedEmail);
-        if (!email || !invitedName) {
-            throw httpError(400, 'Invited email and name are required.');
-        }
-
-        const existingInvitation = await Invitation.findOne({
-            invitedEmail: email,
-            status: 'pending',
+        const { invitation, emailResult } = await createAdminInvitationRecord({
             organizationId,
-            invitationType: 'organization_admin'
-        });
-        if (existingInvitation) {
-            throw httpError(409, 'Pending invitation already exists for this email');
-        }
-
-        const existingUser = await User.findOne({ 'profile.email': email });
-        if (existingUser) {
-            if (existingUser.role === 'super_admin') {
-                throw httpError(409, 'Super Admin accounts cannot be assigned as organization admins.');
-            }
-            if (existingUser.role === 'admin' && existingUser.organizationId && existingUser.organizationId.toString() !== String(organizationId)) {
-                throw httpError(409, 'This user is already an administrator of another organization.');
-            }
-        }
-
-        const invitation = await Invitation.create({
-            organizationId,
-            invitedEmail: email,
+            invitedEmail,
             invitedName,
-            invitationType: 'organization_admin',
             invitedBy: req.user.id,
-            expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
+            actor: req.user
         });
-
-        const emailResult = await sendAdminInvitationEmail(invitation, organization);
-        invitation.emailStatus = emailResult.status;
-        invitation.emailSentAt = emailResult.status === 'sent' ? new Date() : null;
-        invitation.emailMessageId = emailResult.messageId || null;
-        invitation.emailError = emailResult.error || null;
-        await invitation.save();
 
         res.status(201).json({
             success: true,
@@ -174,12 +137,16 @@ async function createEmployeeInvitation(req, res, next) {
 
         const existingInvitation = await Invitation.findOne({
             invitedEmail: email,
-            status: 'pending',
+            status: { $in: ['pending', 'accepted'] },
             organizationId,
             invitationType: 'employee'
         });
         if (existingInvitation) {
-            throw httpError(409, 'Pending invitation already exists for this email');
+            console.log('[INVITATION] Existing invitation found for email:', email, 'status:', existingInvitation.status);
+            if (existingInvitation.status === 'accepted') {
+                throw httpError(409, 'This email has already accepted an invitation for this organization.');
+            }
+            throw httpError(409, 'A pending invitation already exists for this email.');
         }
 
         const invitation = await Invitation.create({
@@ -308,33 +275,96 @@ async function acceptAdminInvitation(req, res, next) {
 
 async function acceptEmployeeInvitation(req, res, next) {
     try {
+        console.log('[INVITATION ACCEPT] acceptEmployeeInvitation called');
+        console.log('[INVITATION ACCEPT] Token:', req.params.token);
+        console.log('[INVITATION ACCEPT] Request body:', req.body);
+        console.log('[INVITATION ACCEPT] Request user:', req.user);
+        
         const invitation = await loadInvitation(req.params.token, 'employee');
-        if (invitation.status !== 'pending') {
-            throw httpError(400, 'Invitation is no longer valid');
+        console.log('[INVITATION ACCEPT] Invitation loaded:', invitation._id);
+        console.log('[INVITATION ACCEPT] Invitation status:', invitation.status);
+        console.log('[INVITATION ACCEPT] Invitation email:', invitation.invitedEmail);
+        console.log('[INVITATION ACCEPT] Invitation expiresAt:', invitation.expiresAt);
+        console.log('[INVITATION ACCEPT] Current time:', new Date());
+        console.log('[INVITATION ACCEPT] Remaining time:', new Date(invitation.expiresAt) - new Date());
+        
+        // Allow re-acceptance if invitation is accepted but user hasn't submitted application yet
+        // This handles the case where user accepted but navigated away before completing application
+        if (invitation.status === 'accepted') {
+            console.log('[INVITATION ACCEPT] Invitation already accepted, checking if it belongs to this user');
+            if (invitation.acceptedBy && invitation.acceptedBy.toString() === req.user.id) {
+                console.log('[INVITATION ACCEPT] Invitation belongs to this user, allowing to proceed');
+                // Don't throw error, allow user to proceed to application submission
+            } else {
+                console.log('[INVITATION ACCEPT] Invitation belongs to different user');
+                return res.status(400).json({
+                    success: false,
+                    message: 'This invitation has already been accepted by another user.'
+                });
+            }
+        }
+        
+        if (invitation.status !== 'pending' && invitation.status !== 'accepted') {
+            console.log('[INVITATION ACCEPT] Invitation not valid, status:', invitation.status);
+            return res.status(400).json({
+                success: false,
+                message: `Invitation is no longer valid. Current status: ${invitation.status}`
+            });
         }
 
         const user = await loadDbUser(req.user);
-        const submittedEmail = normalizeEmail(req.body.email || user.profile?.email);
-        assertEmailMatch(invitation, user, submittedEmail);
-        await assertEmailAvailable(invitation.invitedEmail, user._id);
+        console.log('[INVITATION ACCEPT] User loaded:', user._id, 'role:', user.role);
+        console.log('[INVITATION ACCEPT] User profile email:', user.profile?.email);
+        
+        const submittedEmail = normalizeEmail(req.body?.email || user.profile?.email);
+        console.log('[INVITATION ACCEPT] Submitted email:', submittedEmail);
+        
+        // Log email matching check
+        const invited = normalizeEmail(invitation.invitedEmail);
+        const profileEmail = normalizeEmail(user.profile?.email);
+        console.log('[INVITATION ACCEPT] Invited email:', invited);
+        console.log('[INVITATION ACCEPT] Profile email:', profileEmail);
+        console.log('[INVITATION ACCEPT] Email match check - submittedEmail:', submittedEmail, 'invited:', invited, 'profile:', profileEmail);
+        
+        // If user has no email yet, we'll set it from the invitation
+        // This is expected for new users accepting invitations
+        if (!submittedEmail || !profileEmail) {
+            console.log('[INVITATION ACCEPT] User has no email yet, will set from invitation');
+        } else {
+            assertEmailMatch(invitation, user, submittedEmail);
+            await assertEmailAvailable(invitation.invitedEmail, user._id);
+        }
 
         if (user.role === 'admin' || user.role === 'super_admin') {
-            throw httpError(409, 'Administrator accounts cannot accept employee invitations.');
+            console.log('[INVITATION ACCEPT] User is admin/super_admin, rejecting');
+            return res.status(409).json({
+                success: false,
+                message: 'Administrator accounts cannot accept employee invitations.'
+            });
+        }
+
+        // Only update invitation status if it's still pending
+        if (invitation.status === 'pending') {
+            invitation.status = 'accepted';
+            invitation.acceptedAt = new Date();
+            invitation.acceptedBy = user._id;
+            invitation.acceptedWalletAddress = user.walletAddress;
+            await invitation.save();
+            console.log('[INVITATION ACCEPT] Invitation status updated to accepted');
+        } else {
+            console.log('[INVITATION ACCEPT] Invitation already accepted, skipping status update');
         }
 
         user.profile = {
             ...(user.profile?.toObject?.() || user.profile || {}),
             email: invitation.invitedEmail,
-            displayName: String(req.body.name || invitation.invitedName || user.profile?.displayName || '').trim(),
-            phone: String(req.body.phone || user.profile?.phone || '').trim()
+            displayName: String(req.body?.name || invitation.invitedName || user.profile?.displayName || '').trim(),
+            phone: String(req.body?.phone || user.profile?.phone || '').trim(),
+            emailVerified: false, // Force email verification for employee onboarding
+            emailVerifiedAt: null
         };
         await user.save();
-
-        invitation.status = 'accepted';
-        invitation.acceptedAt = new Date();
-        invitation.acceptedBy = user._id;
-        invitation.acceptedWalletAddress = user.walletAddress;
-        await invitation.save();
+        console.log('[INVITATION ACCEPT] User profile updated, emailVerified set to false');
 
         res.json({
             success: true,
@@ -346,7 +376,18 @@ async function acceptEmployeeInvitation(req, res, next) {
             }
         });
     } catch (error) {
-        next(error);
+        console.error('[INVITATION ACCEPT] Error:', error);
+        console.error('[INVITATION ACCEPT] Error message:', error.message);
+        console.error('[INVITATION ACCEPT] Error stack:', error.stack);
+        
+        // Return the actual error message instead of generic 400
+        const statusCode = error.statusCode || 500;
+        const message = error.message || 'An error occurred while accepting the invitation';
+        
+        return res.status(statusCode).json({
+            success: false,
+            message: message
+        });
     }
 }
 
@@ -369,6 +410,14 @@ async function submitEmployeeApplication(req, res, next) {
         // CRITICAL: Never downgrade Super Admins or Admins
         if (user.role === 'super_admin' || user.role === 'admin') {
             throw httpError(409, 'Administrator accounts cannot submit employee applications.');
+        }
+
+        // Enforce email verification server-side so it cannot be bypassed by
+        // calling this endpoint directly. EMAIL_VERIFIED is persisted on the
+        // user (survives restarts) with the in-memory OTP store as a fallback.
+        const emailVerified = Boolean(user.profile?.emailVerified) || isEmailVerified(invitation.invitedEmail);
+        if (!emailVerified) {
+            throw httpError(403, 'Verify your email with the OTP code before submitting your application.');
         }
 
         user.profile = {

@@ -1,75 +1,127 @@
 const express = require('express');
 const router = express.Router();
-const { createOTP, verifyOTP, resendOTP, canResendOTP, getUserOTPStatus } = require('../services/otpService');
+const { createOTP, verifyOTP, resendOTP, canResendOTP, getUserOTPStatus, markEmailVerified } = require('../services/otpService');
 const { sendEmail } = require('../services/emailService');
-const { protect } = require('../middleware/authMiddleware');
+const { sendSms, isSmsConfigured } = require('../services/smsService');
+const { protect, attachUserIfPresent } = require('../middleware/authMiddleware');
 const User = require('../model/userModel');
 
+const isProduction = () => process.env.NODE_ENV === 'production';
+
+function maskContact(value) {
+    const str = String(value || '');
+    if (str.length <= 4) return '****';
+    return `${str.slice(0, 2)}****${str.slice(-2)}`;
+}
+
 // ============================================================
-// PUBLIC EMAIL OTP ENDPOINTS (no auth required)
-// These allow new users accepting invitations to verify their email
+// PUBLIC EMAIL OTP ENDPOINTS (optional auth)
+// These allow new users accepting invitations to verify their email.
+// attachUserIfPresent lets us persist verification against the signed-in
+// account when the client sends its token (invitation acceptance flow),
+// without requiring auth for brand-new users.
 // ============================================================
 
-// Request email OTP - public endpoint for invitation acceptors and new users
-router.post('/email/request', async (req, res, next) => {
+// Request email OTP
+router.post('/email/request', attachUserIfPresent, async (req, res, next) => {
     try {
+        console.log('[EMPLOYEE EMAIL VERIFY] OTP request called');
+        console.log('[EMPLOYEE EMAIL VERIFY] Request body:', req.body);
+        console.log('[EMPLOYEE EMAIL VERIFY] Authenticated user:', req.user?.id);
+        
         const { email } = req.body;
 
         if (!email || !email.includes('@')) {
+            console.log('[EMPLOYEE EMAIL VERIFY] Invalid email');
             return res.status(400).json({ success: false, message: 'Valid email is required.' });
         }
 
+        console.log('[EMPLOYEE EMAIL VERIFY] Email:', email);
+
         // Check if user already exists with this email
-        const existingUser = await User.findOne({ 'profile.email': email }).select('_id role');
-        if (existingUser) {
-            // User already exists - check if email is already verified
-            if (existingUser.profile && existingUser.profile.emailVerified) {
-                return res.status(200).json({
-                    success: true,
-                    message: 'Email is already verified.',
-                    emailVerified: true
-                });
-            }
-            // User exists but email not verified - still allow OTP request
-            // but return the existing user info
+        const existingUser = await User.findOne({ 'profile.email': email.toLowerCase() }).select('_id role profile.emailVerified organizationId');
+        console.log('[EMPLOYEE EMAIL VERIFY] Existing user check - user:', existingUser?._id, 'emailVerified:', existingUser?.profile?.emailVerified, 'organizationId:', existingUser?.organizationId);
+        
+        // For employee invitation flow, always allow OTP send even if email was previously verified
+        // The invitation acceptance sets emailVerified to false to force re-verification
+        // Only skip OTP if user is already verified AND has an organization (completed onboarding)
+        if (existingUser && existingUser.profile && existingUser.profile.emailVerified && existingUser.organizationId) {
+            console.log('[EMPLOYEE EMAIL VERIFY] Email already verified and user has organization - skipping OTP');
             return res.status(200).json({
                 success: true,
-                message: 'OTP sent. Email exists but not yet verified.',
-                emailVerified: false,
-                existingUserId: existingUser._id
+                message: 'Email is already verified.',
+                emailVerified: true
             });
         }
+        
+        // If user is verified but has no organization (employee onboarding in progress), reset verification to force OTP
+        if (existingUser && existingUser.profile && existingUser.profile.emailVerified && !existingUser.organizationId) {
+            console.log('[EMPLOYEE EMAIL VERIFY] User verified but no organization - resetting emailVerified to force OTP');
+            existingUser.profile.emailVerified = false;
+            existingUser.profile.emailVerifiedAt = null;
+            await existingUser.save();
+        }
+        
+        console.log('[EMPLOYEE EMAIL VERIFY] Proceeding with OTP generation');
 
         // Check resend cooldown
         const canResend = await canResendOTP(email, 'email');
+        console.log('[EMPLOYEE EMAIL VERIFY] Can resend:', canResend.canResend);
         if (!canResend.canResend) {
+            console.log('[EMPLOYEE EMAIL VERIFY] Resend cooldown active');
             return res.status(429).json({ success: false, message: canResend.error });
         }
 
+        // Try to get user name for personalization
+        const userName = existingUser?.profile?.displayName || existingUser?.profile?.name || '';
+
         // Create OTP
+        console.log('[EMPLOYEE EMAIL VERIFY] Creating OTP');
         const { otp, expiresAt } = await createOTP(email, 'email');
+        console.log('[EMPLOYEE EMAIL VERIFY] OTP generated: YES');
+        console.log('[EMPLOYEE EMAIL VERIFY] OTP expires at:', expiresAt);
 
         // Send email
+        const greeting = userName ? `Hello ${userName},` : 'Hello,';
         const html = `
             <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-                <h2 style="color: #0ea5e9;">Email Verification OTP</h2>
+                <h2 style="color: #0ea5e9;">Email Verification Code</h2>
+                <p>${greeting}</p>
                 <p>Your verification code for DEMS is:</p>
                 <p style="font-size: 32px; font-weight: bold; letter-spacing: 4px; margin: 20px 0;">${otp}</p>
                 <p><strong>Important:</strong> This code will expire in 10 minutes.</p>
+                <p>Please enter this code in the verification page to complete your email verification.</p>
                 <p style="color: #666; font-size: 12px;">If you did not request this code, please ignore this email.</p>
                 <p style="color: #666; font-size: 12px;">DEMS - Decentralized Evidence Management System</p>
             </div>
         `;
 
+        console.log('[EMPLOYEE EMAIL VERIFY] Calling email service');
         const emailResult = await sendEmail({
             to: email,
-            subject: 'DEMS Email Verification Code',
-            html
+            subject: 'Verify your email address - DEMS',
+            html,
+            text: `${greeting}\n\nYour verification code for DEMS is: ${otp}\n\nThis code will expire in 10 minutes.\n\nIf you did not request this code, please ignore this email.\n\nDEMS - Decentralized Evidence Management System`
         });
 
+        console.log('[EMPLOYEE EMAIL VERIFY] Email service called: YES');
+        console.log('[EMPLOYEE EMAIL VERIFY] Email result:', emailResult);
+
         if (!emailResult.success) {
-            return res.status(500).json({ success: false, message: 'Failed to send OTP email', error: emailResult.error });
+            console.log('[EMPLOYEE EMAIL VERIFY] Email sending failed:', emailResult.error);
+            return res.status(502).json({
+                success: false,
+                message: emailResult.status === 'not_configured'
+                    ? 'Email delivery is not configured on the server.'
+                    : 'Failed to send OTP email',
+                emailStatus: emailResult.status,
+                error: emailResult.error
+            });
         }
+
+        console.log('[EMPLOYEE EMAIL VERIFY] SMTP send attempted: YES');
+        console.log('[EMPLOYEE EMAIL VERIFY] SMTP result:', emailResult.status);
+        console.log('[EMPLOYEE EMAIL VERIFY] Message ID:', emailResult.messageId);
 
         res.status(200).json({
             success: true,
@@ -78,12 +130,14 @@ router.post('/email/request', async (req, res, next) => {
             emailStatus: emailResult.status
         });
     } catch (err) {
+        console.error('[EMPLOYEE EMAIL VERIFY] Error:', err);
+        console.error('[EMPLOYEE EMAIL VERIFY] Error stack:', err.stack);
         next(err);
     }
 });
 
-// Verify email OTP - public endpoint for invitation acceptors and new users
-router.post('/email/verify', async (req, res, next) => {
+// Verify email OTP
+router.post('/email/verify', attachUserIfPresent, async (req, res, next) => {
     try {
         const { email, otp } = req.body;
 
@@ -93,33 +147,51 @@ router.post('/email/verify', async (req, res, next) => {
 
         const result = await verifyOTP(email, otp, 'email');
 
-        if (result.success) {
-            // Update user email verification status if user exists
-            if (req.user) {
-                const user = await User.findById(req.user.id);
-                if (user) {
-                    user.profile = user.profile || {};
-                    user.profile.emailVerified = true;
-                    user.profile.emailVerifiedAt = new Date();
-                    await user.save();
-                }
-            }
-
-            return res.status(200).json({ success: true, message: 'Email verified successfully' });
-        } else {
+        if (!result.success) {
             return res.status(400).json({ success: false, message: result.error, attemptsRemaining: result.attemptsRemaining });
         }
+
+        const emailLower = email.toLowerCase();
+        // Record the verified email as a server-side fact (EMAIL_VERIFIED state),
+        // separate from EMAIL_SENT. This is what onboarding enforcement checks.
+        markEmailVerified(emailLower);
+
+        // Persist verification on the owning account when we can identify one:
+        // the signed-in user (token sent on this route) or an existing account
+        // that already owns this email. Only bind the email if it is free or
+        // already theirs, so one user cannot verify another user's email.
+        let targetUser = null;
+        if (req.user?.id) {
+            targetUser = await User.findById(req.user.id);
+        }
+        if (!targetUser) {
+            targetUser = await User.findOne({ 'profile.email': emailLower });
+        }
+        if (targetUser) {
+            const owner = await User.findOne({ 'profile.email': emailLower }).select('_id');
+            const emailFreeOrMine = !owner || owner._id.toString() === targetUser._id.toString();
+            if (emailFreeOrMine) {
+                targetUser.profile = {
+                    ...(targetUser.profile?.toObject?.() || targetUser.profile || {}),
+                    email: emailLower,
+                    emailVerified: true,
+                    emailVerifiedAt: new Date()
+                };
+                await targetUser.save();
+            }
+        }
+
+        return res.status(200).json({ success: true, message: 'Email verified successfully', emailVerified: true });
     } catch (err) {
         next(err);
     }
 });
 
 // ============================================================
-// AUTHENTICATED OTP ENDPOINTS (require JWT)
-// For existing users who already have a JWT
+// AUTHENTICATED PHONE OTP ENDPOINTS (require JWT)
 // ============================================================
 
-// Request phone OTP (requires authentication)
+// Request phone OTP
 router.post('/phone/request', protect, async (req, res, next) => {
     try {
         const { phone } = req.body;
@@ -137,18 +209,29 @@ router.post('/phone/request', protect, async (req, res, next) => {
         // Create OTP
         const { otp, expiresAt } = await createOTP(phone, 'phone');
 
-        if (!process.env.SMS_PROVIDER || !process.env.SMS_API_KEY) {
-            console.log('[SMS] SMS provider not configured - OTP would be:', otp);
+        if (!isSmsConfigured()) {
+            // Development convenience ONLY: never log OTP values in production.
+            if (!isProduction()) {
+                console.log(`[SMS][DEV] Provider not configured. Verification code for ${maskContact(phone)}: ${otp}`);
+            }
             return res.status(200).json({
                 success: true,
-                message: 'SMS provider not configured (development mode)',
+                message: 'SMS provider is not configured. Set TWILIO_* or SMS_API_* env vars to enable delivery.',
                 expiresAt,
-                smsStatus: 'not_configured',
-                devOTP: otp
+                smsStatus: 'not_configured'
             });
         }
 
-        console.log('[SMS] SMS would be sent to:', phone, 'with OTP:', otp);
+        const smsResult = await sendSms(phone, `Your DEMS verification code is ${otp}. It expires in 10 minutes.`);
+
+        if (smsResult.status !== 'sent') {
+            return res.status(502).json({
+                success: false,
+                message: 'Failed to send verification SMS.',
+                smsStatus: smsResult.status,
+                error: smsResult.error || null
+            });
+        }
 
         res.status(200).json({
             success: true,
@@ -161,7 +244,7 @@ router.post('/phone/request', protect, async (req, res, next) => {
     }
 });
 
-// Verify phone OTP (requires authentication)
+// Verify phone OTP
 router.post('/phone/verify', protect, async (req, res, next) => {
     try {
         const { phone, otp } = req.body;
@@ -172,19 +255,25 @@ router.post('/phone/verify', protect, async (req, res, next) => {
 
         const result = await verifyOTP(phone, otp, 'phone');
 
-        if (result.success) {
-            const user = await User.findById(req.user.id);
-            if (user) {
-                user.profile = user.profile || {};
-                user.profile.phoneVerified = true;
-                user.profile.phoneVerifiedAt = new Date();
-                await user.save();
-            }
-
-            return res.status(200).json({ success: true, message: 'Phone verified successfully' });
-        } else {
+        if (!result.success) {
             return res.status(400).json({ success: false, message: result.error, attemptsRemaining: result.attemptsRemaining });
         }
+
+        const user = await User.findById(req.user.id);
+        if (user) {
+            // Bind the verified number to this account so phoneVerified always
+            // reflects the number that was actually verified — a user cannot
+            // verify one number and have a different stored number marked verified.
+            user.profile = {
+                ...(user.profile?.toObject?.() || user.profile || {}),
+                phone: String(phone).trim(),
+                phoneVerified: true,
+                phoneVerifiedAt: new Date()
+            };
+            await user.save();
+        }
+
+        return res.status(200).json({ success: true, message: 'Phone verified successfully' });
     } catch (err) {
         next(err);
     }
@@ -201,39 +290,53 @@ router.post('/resend', protect, async (req, res, next) => {
 
         const result = await resendOTP(contact, type);
 
-        if (typeof result === 'object' && 'otp' in result) {
-            if (type === 'email') {
-                const html = `
-                    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-                        <h2 style="color: #0ea5e9;">Email Verification OTP (Resent)</h2>
-                        <p>Your new verification code for DEMS is:</p>
-                        <p style="font-size: 32px; font-weight: bold; letter-spacing: 4px; margin: 20px 0;">${result.otp}</p>
-                        <p><strong>Important:</strong> This code will expire in 10 minutes.</p>
-                        <p style="color: #666; font-size: 12px;">DEMS - Decentralized Evidence Management System</p>
-                    </div>
-                `;
-
-                const emailResult = await sendEmail({
-                    to: contact,
-                    subject: 'DEMS Email Verification Code (Resent)',
-                    html
-                });
-
-                if (!emailResult.success) {
-                    return res.status(500).json({ success: false, message: 'Failed to send OTP email', error: emailResult.error });
-                }
-            } else {
-                console.log('[SMS] SMS would be resent to:', contact, 'with OTP:', result.otp);
-            }
-
-            return res.status(200).json({
-                success: true,
-                message: 'OTP resent successfully',
-                expiresAt: result.expiresAt
-            });
-        } else {
+        if (!(typeof result === 'object' && 'otp' in result)) {
             return res.status(429).json({ success: false, message: result.error });
         }
+
+        if (type === 'email') {
+            const html = `
+                <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+                    <h2 style="color: #0ea5e9;">Email Verification OTP (Resent)</h2>
+                    <p>Your new verification code for DEMS is:</p>
+                    <p style="font-size: 32px; font-weight: bold; letter-spacing: 4px; margin: 20px 0;">${result.otp}</p>
+                    <p><strong>Important:</strong> This code will expire in 10 minutes.</p>
+                    <p style="color: #666; font-size: 12px;">DEMS - Decentralized Evidence Management System</p>
+                </div>
+            `;
+
+            const emailResult = await sendEmail({
+                to: contact,
+                subject: 'DEMS Email Verification Code (Resent)',
+                html
+            });
+
+            if (!emailResult.success) {
+                return res.status(502).json({ success: false, message: 'Failed to send OTP email', error: emailResult.error });
+            }
+        } else {
+            if (!isSmsConfigured()) {
+                if (!isProduction()) {
+                    console.log(`[SMS][DEV] Provider not configured. Resent code for ${maskContact(contact)}: ${result.otp}`);
+                }
+                return res.status(200).json({
+                    success: true,
+                    message: 'SMS provider is not configured.',
+                    expiresAt: result.expiresAt,
+                    smsStatus: 'not_configured'
+                });
+            }
+            const smsResult = await sendSms(contact, `Your DEMS verification code is ${result.otp}. It expires in 10 minutes.`);
+            if (smsResult.status !== 'sent') {
+                return res.status(502).json({ success: false, message: 'Failed to resend verification SMS.', smsStatus: smsResult.status, error: smsResult.error || null });
+            }
+        }
+
+        return res.status(200).json({
+            success: true,
+            message: 'OTP resent successfully',
+            expiresAt: result.expiresAt
+        });
     } catch (err) {
         next(err);
     }
@@ -248,9 +351,8 @@ router.get('/status', protect, async (req, res, next) => {
         }
 
         const email = user.profile?.email;
-        const phone = user.profile?.phone;
 
-        const status = await getUserOTPStatus(email);
+        const status = await getUserOTPStatus(email || '');
 
         res.status(200).json({
             success: true,

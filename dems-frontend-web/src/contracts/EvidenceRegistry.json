@@ -1,6 +1,6 @@
 {
   "contractName": "EvidenceRegistry",
-  "address": "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0",
+  "address": "0x5FbDB2315678afecb367f032d93F642f64180aa3",
   "chainId": 31337,
   "network": "localhost",
   "abi": [
@@ -697,5 +697,5 @@
       "type": "function"
     }
   ],
-  "deployedAt": "2026-10-01T10:17:42.366Z"
+  "deployedAt": "2026-10-19T08:14:38.151Z"
 }

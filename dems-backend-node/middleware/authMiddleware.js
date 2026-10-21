@@ -42,4 +42,34 @@ const protect = async (req, res, next) => {
     }
 };
 
-module.exports = { protect };
+// Optional authentication: if a valid Bearer token is present, attach req.user;
+// otherwise continue as an anonymous request. Never rejects. Used by public
+// endpoints (e.g. email OTP during invitation acceptance) that still want to
+// persist state against the signed-in user when a token happens to be sent.
+const attachUserIfPresent = async (req, res, next) => {
+    try {
+        const authHeader = req.headers.authorization || '';
+        const [scheme, token] = authHeader.split(' ');
+
+        if (scheme !== 'Bearer' || !token || !process.env.JWT_SECRET) {
+            return next();
+        }
+
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        const user = await User.findById(decoded.id).select('_id walletAddress role organizationId accountStatus');
+
+        if (user && user.accountStatus !== 'suspended') {
+            req.user = {
+                id: user._id.toString(),
+                role: user.role,
+                walletAddress: user.walletAddress,
+                organizationId: user.organizationId ? user.organizationId.toString() : null
+            };
+        }
+    } catch (err) {
+        // Ignore invalid/expired tokens — treat as anonymous.
+    }
+    return next();
+};
+
+module.exports = { protect, attachUserIfPresent };

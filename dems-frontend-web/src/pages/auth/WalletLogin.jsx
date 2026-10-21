@@ -1,9 +1,16 @@
-import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { Loader2, Wallet, ExternalLink, AlertTriangle } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
+import { AlertTriangle, ArrowRight, Database, Fingerprint, Lock, ShieldCheck, Wallet } from 'lucide-react';
 import { useAuth } from '../../auth/AuthContext.jsx';
+import BrandMark from '../../components/ui/BrandMark.jsx';
 
-function dashboardPath(role) {
+const CAPABILITIES = [
+  { icon: Lock, title: 'Encrypted before storage', body: 'Files are sealed with AES-256-GCM before they leave the application.' },
+  { icon: Database, title: 'Decentralized storage', body: 'Encrypted content is addressed by CID on IPFS.' },
+  { icon: Fingerprint, title: 'Verifiable integrity', body: 'A blockchain hash proves a file has not changed.' }
+];
+
+function workspacePath(role) {
   if (role === 'super_admin') return '/superadmin/dashboard';
   if (role === 'admin') return '/admin/dashboard';
   if (role === 'officer') return '/officer/dashboard';
@@ -14,71 +21,26 @@ export default function WalletLogin() {
   const navigate = useNavigate();
   const { loginWithWallet, authError, setAuthError, isAuthenticated, user } = useAuth();
   const [busy, setBusy] = useState(false);
-  const [showMetaMaskHelp, setShowMetaMaskHelp] = useState(false);
-  const [currentNetwork, setCurrentNetwork] = useState('');
-  const [loginSuccess, setLoginSuccess] = useState(false);
-
-  // Check if MetaMask is installed
-  const [isMetaMaskInstalled, setIsMetaMaskInstalled] = useState(false);
 
   useEffect(() => {
-    const checkMetaMask = () => {
-      setIsMetaMaskInstalled(!!window.ethereum);
-    };
-    checkMetaMask();
-    
-    // Check current network
-    const checkNetwork = async () => {
-      if (window.ethereum) {
-        const chainId = await window.ethereum.request({ method: 'eth_chainId' });
-        setCurrentNetwork(chainId);
-        console.log('[NETWORK] Current chain ID:', chainId);
-      }
-    };
-    checkNetwork();
-
-    const onChainChanged = (chainId) => {
-      setCurrentNetwork(chainId);
-      console.log('[NETWORK] Chain changed to:', chainId);
-    };
-
-    if (window.ethereum) {
-      window.ethereum.on('chainChanged', onChainChanged);
-      window.ethereum.on('accountsChanged', checkMetaMask);
-    }
-
-    return () => {
-      if (window.ethereum) {
-        window.ethereum.removeListener('chainChanged', onChainChanged);
-        window.ethereum.removeListener('accountsChanged', checkMetaMask);
-      }
-    };
-  }, []);
-
-  useEffect(() => {
-    if (isAuthenticated && user?.role) {
-      navigate(dashboardPath(user.role), { replace: true });
-    }
+    if (!isAuthenticated || !user?.role) return;
+    navigate(
+      user.profile?.emailVerified ? workspacePath(user.role) : '/auth/email-verification',
+      { replace: true }
+    );
   }, [isAuthenticated, user, navigate]);
 
   const login = async () => {
     setBusy(true);
     setAuthError('');
-    setLoginSuccess(false);
     try {
-      console.log('[LOGIN] Starting wallet authentication...');
-
       const verified = await loginWithWallet();
-      console.log('[LOGIN] Wallet verification successful:', verified);
-
-      if (!verified || !verified.user) {
-        throw new Error('Authentication failed: No user data received');
-      }
-
-      setLoginSuccess(true);
-      navigate(dashboardPath(verified.user.role), { replace: true });
+      if (!verified?.user) throw new Error('Authentication failed: no user data received.');
+      navigate(
+        verified.user.profile?.emailVerified ? workspacePath(verified.user.role) : '/auth/email-verification',
+        { replace: true }
+      );
     } catch (error) {
-      console.error('[LOGIN] Authentication error:', error);
       setAuthError(error.message || 'Wallet authentication failed.');
     } finally {
       setBusy(false);
@@ -86,149 +48,126 @@ export default function WalletLogin() {
   };
 
   return (
-    <section className="grid flex-1 place-items-center py-12">
-      <div className="panel w-full max-w-xl p-7">
-        <Wallet className="mb-4 text-sky-300" size={34} />
-        <p className="mb-2 text-xs font-bold uppercase text-sky-300">Wallet authentication</p>
-        <h1 className="text-3xl font-extrabold">Connect MetaMask</h1>
-        <p className="mt-3 leading-7 text-slate-400">
-          DEMS will request a nonce from the backend, ask MetaMask to sign it, verify the signature, then persist the JWT session.
+    <div className="grid min-h-[calc(100vh-140px)] items-center gap-10 py-8 lg:grid-cols-[1.05fr_minmax(0,420px)] lg:gap-16">
+      <div className="order-2 hidden lg:order-1 lg:block">
+        <BrandMark />
+        <h1 className="mt-8 max-w-lg text-[34px] font-semibold leading-[1.15] tracking-[-0.025em] text-ink">
+          Secure files. Decentralized storage. Verifiable integrity.
+        </h1>
+        <p className="mt-4 max-w-md text-[14.5px] leading-7 text-ink-muted">
+          DEMS stores and manages files for organizations and individuals without passwords. Access is
+          signed by your wallet, files are encrypted, and integrity can be proven independently.
         </p>
 
-        {!isMetaMaskInstalled && (
-          <div className="mt-4 p-4 rounded-lg border border-amber-500/30 bg-amber-950/20">
-            <div className="flex items-start gap-3">
-              <AlertTriangle className="text-amber-400 mt-1" size={20} />
-              <div className="flex-1">
-                <p className="text-sm font-medium text-amber-300 mb-2">MetaMask is required</p>
-                <p className="text-xs text-slate-400 mb-3">
-                  MetaMask is a cryptocurrency wallet required to securely authenticate with DEMS using blockchain signatures.
-                </p>
-                <button
-                  type="button"
-                  onClick={() => setShowMetaMaskHelp(!showMetaMaskHelp)}
-                  className="text-xs text-sky-300 hover:text-sky-200 underline"
-                >
-                  {showMetaMaskHelp ? 'Hide' : 'Show'} installation instructions
-                </button>
-              </div>
-            </div>
+        <ul className="mt-8 grid max-w-md gap-3">
+          {CAPABILITIES.map((item) => {
+            const Icon = item.icon;
+            return (
+              <li key={item.title} className="flex items-start gap-3 rounded-[10px] border border-line bg-card p-3.5 shadow-card">
+                <span className="grid h-8 w-8 shrink-0 place-items-center rounded-[8px] bg-brand-soft text-brand">
+                  <Icon size={15} strokeWidth={1.9} />
+                </span>
+                <div>
+                  <p className="text-[13px] font-medium text-ink">{item.title}</p>
+                  <p className="mt-0.5 text-[12.5px] leading-5 text-ink-muted">{item.body}</p>
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      </div>
 
-            {showMetaMaskHelp && (
-              <div className="mt-4 pt-4 border-t border-amber-500/20">
-                <h4 className="text-sm font-medium text-amber-300 mb-3">How to install MetaMask:</h4>
-                <ol className="text-xs text-slate-400 space-y-2 list-decimal list-inside">
-                  <li>Visit the official MetaMask website</li>
-                  <li>Click "Install MetaMask for your browser"</li>
-                  <li>Follow the installation instructions</li>
-                  <li>Create a new wallet or import an existing one</li>
-                  <li>Securely store your seed phrase</li>
-                  <li>Unlock MetaMask when prompted</li>
-                  <li>Return to this page and click "Connect Wallet"</li>
-                </ol>
+      <div className="order-1 mx-auto w-full max-w-[420px] lg:order-2">
+        <div className="section-card">
+          <div className="lg:hidden">
+            <BrandMark />
+          </div>
+          <div className="mt-6 flex items-start gap-3 lg:mt-0">
+            <span className="grid h-10 w-10 shrink-0 place-items-center rounded-[10px] bg-brand-soft text-brand">
+              <Wallet size={18} />
+            </span>
+            <div>
+              <h2 className="text-[19px] font-semibold tracking-[-0.01em] text-ink">Sign in with your wallet</h2>
+              <p className="mt-1 text-[13px] leading-5 text-ink-muted">
+                No password. MetaMask signs a one-time message that proves you own the wallet.
+              </p>
+            </div>
+          </div>
+
+          <ol className="mt-5 space-y-2.5 rounded-[10px] border border-line bg-[#FBFCFD] p-3.5">
+            {[
+              'DEMS requests a one-time nonce from the server.',
+              'MetaMask signs the nonce with your wallet.',
+              'The signature is verified and a session is issued.'
+            ].map((step, index) => (
+              <li key={step} className="flex items-start gap-2.5 text-[12.5px] leading-5 text-ink-muted">
+                <span className="mt-0.5 grid h-4 w-4 shrink-0 place-items-center rounded-full bg-card text-[10px] font-semibold text-ink-faint ring-1 ring-line">
+                  {index + 1}
+                </span>
+                {step}
+              </li>
+            ))}
+          </ol>
+
+          {!window.ethereum ? (
+            <div className="alert-warn mt-4">
+              <AlertTriangle size={15} className="mt-0.5 shrink-0" />
+              <div>
+                <p className="font-medium">MetaMask is required</p>
+                <p className="mt-0.5">Install the browser extension, then return to this page.</p>
                 <a
                   href="https://metamask.io/download/"
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-flex items-center gap-2 mt-4 px-4 py-2 bg-sky-500/20 text-sky-300 rounded-lg hover:bg-sky-500/30 text-xs font-medium"
+                  className="mt-1.5 inline-flex items-center gap-1 font-medium underline underline-offset-2"
                 >
-                  <ExternalLink size={14} />
                   Install MetaMask
+                  <ArrowRight size={12} />
                 </a>
               </div>
-            )}
-          </div>
-        )}
-
-        {isMetaMaskInstalled && currentNetwork && (
-          <div className="mt-4 p-4 rounded-lg border border-sky-500/30 bg-sky-950/20">
-            <div className="flex items-start gap-3">
-              <Wallet className="text-sky-400 mt-1" size={20} />
-              <div className="flex-1">
-                <p className="text-sm font-medium text-sky-300 mb-2">Current Network</p>
-                <p className="text-xs text-slate-400 mb-2">
-                  Chain ID: {currentNetwork} (DEMS requires: 0x7a69 for localhost)
-                </p>
-                {currentNetwork !== '0x7a69' && currentNetwork !== '0xc353' && (
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      try {
-                        await window.ethereum.request({
-                          method: 'wallet_addEthereumChain',
-                          params: [{
-                            chainId: '0x7a69',
-                            chainName: 'Hardhat Local',
-                            nativeCurrency: {
-                              name: 'ETH',
-                              symbol: 'ETH',
-                              decimals: 18
-                            },
-                            rpcUrls: ['http://127.0.0.1:8545']
-                          }]
-                        });
-                      } catch (error) {
-                        console.error('Failed to add network:', error);
-                      }
-                    }}
-                    className="px-3 py-1.5 bg-sky-500/20 text-sky-300 rounded hover:bg-sky-500/30 text-xs font-medium"
-                  >
-                    Add Hardhat Local Network
-                  </button>
-                )}
-              </div>
             </div>
-          </div>
-        )}
+          ) : null}
 
-        {loginSuccess && (
-          <div className="mt-4 p-4 rounded-lg border border-green-500/30 bg-green-950/20">
-            <p className="text-sm text-green-200">Login successful! Redirecting to dashboard...</p>
-            <button
-              onClick={() => navigate(dashboardPath(user?.role))}
-              className="mt-2 text-xs text-green-300 hover:text-green-200 underline"
-            >
-              Continue to dashboard
-            </button>
-          </div>
-        )}
+          {authError ? (
+            <div className="alert-danger mt-4" role="alert">
+              <AlertTriangle size={15} className="mt-0.5 shrink-0" />
+              <span className="flex-1">{authError}</span>
+              <button type="button" className="shrink-0 font-medium underline" onClick={() => setAuthError('')}>
+                Dismiss
+              </button>
+            </div>
+          ) : null}
 
-        {authError ? (
-          <div className="mt-4 border border-red-400/50 bg-red-950/30 p-3">
-            <p className="text-sm text-red-200">{authError}</p>
-            <button 
-              onClick={() => setAuthError('')}
-              className="mt-2 text-xs text-red-300 hover:text-red-200 underline"
-            >
-              Dismiss
-            </button>
-          </div>
-        ) : null}
-        
-        <button 
-          className="btn-primary mt-6 w-full" 
-          onClick={login} 
-          disabled={busy || !isMetaMaskInstalled}
-        >
-          {busy ? (
-            <>
-              <Loader2 className="animate-spin" size={18} />
-              <span className="ml-2">Authenticating...</span>
-            </>
-          ) : (
-            <>
-              <Wallet size={18} />
-              <span className="ml-2">Connect Wallet</span>
-            </>
-          )}
-        </button>
-        
-        {!isMetaMaskInstalled && (
-          <p className="mt-3 text-xs text-center text-slate-500">
-            Install MetaMask to continue
+          <button
+            type="button"
+            className="btn-primary mt-5 w-full"
+            onClick={login}
+            disabled={busy || !window.ethereum}
+          >
+            {busy ? (
+              <>
+                <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/40 border-t-white" />
+                Waiting for signature…
+              </>
+            ) : (
+              <>
+                <Wallet size={15} />
+                Connect MetaMask
+              </>
+            )}
+          </button>
+
+          <p className="mt-3 flex items-center justify-center gap-1.5 text-[11.5px] text-ink-faint">
+            <ShieldCheck size={12} />
+            DEMS never sees your private key.
           </p>
-        )}
+        </div>
+
+        <p className="mt-4 text-center text-[12px] text-ink-faint">
+          New accounts are created automatically on first sign-in.{' '}
+          <Link to="/public/about" className="link">Learn about DEMS</Link>
+        </p>
       </div>
-    </section>
+    </div>
   );
 }

@@ -1,0 +1,21 @@
+# Dependencies
+node_modules/
+
+# Environment & secrets — NEVER commit real credentials.
+# Note: VITE_* vars are embedded in the client bundle and are not secrets,
+# but the file is still kept out of version control by convention.
+.env
+.env.*
+!.env.example
+
+# Build output
+dist/
+build/
+
+# Logs & runtime
+*.log
+*.pid
+
+# OS generated files
+.DS_Store
+Thumbs.db

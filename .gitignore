@@ -1,0 +1,35 @@
+# Root ignore rules for the DEMS monorepo.
+# Each subproject (dems-backend-node, dems-frontend-web, dems-smart-contracts)
+# also has its own .gitignore.
+
+# Dependencies
+**/node_modules/
+.pnpm-store/
+
+# Environment & secrets — NEVER commit real credentials
+**/.env
+**/.env.*
+!**/.env.example
+
+# Build output
+**/dist/
+**/build/
+
+# Hardhat artifacts
+**/artifacts/
+**/cache/
+**/typechain-types/
+
+# Local evidence stores & uploads
+**/uploads/
+**/quarantine-store/
+
+# Logs & runtime
+*.log
+**/*.log
+*.pid
+**/*.pid
+
+# OS generated files
+.DS_Store
+Thumbs.db

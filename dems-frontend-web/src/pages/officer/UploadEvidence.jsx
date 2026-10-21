@@ -3,7 +3,19 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { AlertTriangle, CheckCircle2, Loader2, ShieldCheck, UploadCloud } from 'lucide-react';
+import {
+  AlertTriangle,
+  ArrowRight,
+  Check,
+  CheckCircle2,
+  Circle,
+  FileUp,
+  Loader2,
+  Lock,
+  ShieldCheck,
+  UploadCloud,
+  X
+} from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import exifr from 'exifr';
 
@@ -11,12 +23,16 @@ import {
   finalizeEvidence,
   getUploadPolicy,
   markBlockchainFailed,
+  retryBlockchainRegistration,
+  checkWalletBalance,
   uploadEvidence
 } from '../../api/evidence.js';
 import { addEvidenceOnChain, EVIDENCE_CONTRACT_ADDRESS } from '../../blockchain/evidenceContract.js';
 import HashValue from '../../components/HashValue.jsx';
 import StatusBadge from '../../components/StatusBadge.jsx';
+import PageHeader from '../../components/ui/PageHeader.jsx';
 import { useAuth } from '../../auth/AuthContext.jsx';
+import { formatBytes } from '../../utils/format.js';
 
 const schema = z.object({
   caseId: z.string().max(120).optional(),
@@ -26,6 +42,17 @@ const schema = z.object({
   capturedAt: z.string().min(1),
   evidence: z.any()
 });
+
+const STAGE_ORDER = ['collect', 'upload', 'ai', 'chain', 'finalize', 'complete'];
+
+const STAGE_COPY = {
+  collect: { title: 'Collect details', detail: 'Select the file and capture context' },
+  upload: { title: 'Encrypt & store', detail: 'AES-256-GCM, then upload to IPFS' },
+  ai: { title: 'AI verification', detail: 'Authenticity screening, if requested' },
+  chain: { title: 'Blockchain proof', detail: 'Record the integrity hash on-chain' },
+  finalize: { title: 'Confirm', detail: 'Associate the transaction with the file' },
+  complete: { title: 'Complete', detail: 'File is stored and verifiable' }
+};
 
 export default function UploadEvidence() {
   const { role } = useAuth();
@@ -41,6 +68,9 @@ export default function UploadEvidence() {
   const [error, setError] = useState('');
   const [requestAI, setRequestAI] = useState(!isEmployee);
   const [requestBlockchain, setRequestBlockchain] = useState(false);
+  const [selectedFile, setSelectedFile] = useState(null);
+  const [dragging, setDragging] = useState(false);
+  const [diagnostics, setDiagnostics] = useState(null);
   const pendingFormData = useRef(null);
 
   const policyQuery = useQuery({ queryKey: ['upload-policy'], queryFn: getUploadPolicy });
@@ -69,6 +99,7 @@ export default function UploadEvidence() {
     setTimeout(() => {
       if (fileInputRef.current) fileInputRef.current.value = '';
       form.reset();
+      setSelectedFile(null);
       setUploadResult(null);
       setAiPreview(null);
       setTxHash('');
@@ -104,13 +135,49 @@ export default function UploadEvidence() {
       resetAfterSuccess();
     },
     onError: async (err, stored) => {
-      const message = err?.response?.data?.message || err.message || 'Blockchain proof could not be created. Your evidence remains stored in IPFS.';
+      const message = err?.response?.data?.message || err.message || 'Blockchain proof could not be created. Your file remains stored in IPFS.';
       setError(message);
       const evidenceId = stored?.evidenceId || uploadResult?.evidenceId;
       if (evidenceId) {
         await markBlockchainFailed(evidenceId, message).catch(() => {});
       }
       setStage('ai');
+
+      // Run diagnostics on blockchain error
+      if (window.ethereum) {
+        try {
+          const accounts = await window.ethereum.request({ method: 'eth_accounts' });
+          const chainId = await window.ethereum.request({ method: 'eth_chainId' });
+          if (accounts[0]) {
+            const balanceData = await checkWalletBalance(accounts[0]);
+            setDiagnostics({
+              frontend: {
+                connectedAccount: accounts[0],
+                chainId,
+                chainIdDecimal: parseInt(chainId, 16)
+              },
+              backend: balanceData.data
+            });
+          }
+        } catch (diagErr) {
+          console.error('Diagnostic check failed:', diagErr);
+        }
+      }
+    }
+  });
+
+  const retryMutation = useMutation({
+    mutationFn: async (evidenceId) => {
+      const response = await retryBlockchainRegistration(evidenceId);
+      return response.data;
+    },
+    onSuccess: (data) => {
+      setUploadResult(data);
+      setError('');
+      chainMutation.mutate(data);
+    },
+    onError: (err) => {
+      setError(err?.response?.data?.message || err.message || 'Failed to retry blockchain registration.');
     }
   });
 
@@ -147,6 +214,38 @@ export default function UploadEvidence() {
       setStage('collect');
     }
   });
+
+  const handleFileChosen = async (file) => {
+    if (!file) {
+      setSelectedFile(null);
+      return;
+    }
+    setSelectedFile(file);
+    try {
+      const exif = await exifr.parse(file);
+      const source = exif?.DateTimeOriginal || file.lastModified;
+      if (!source) return;
+      const d = new Date(source);
+      form.setValue('capturedAt', new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16));
+    } catch {
+      /* EXIF is optional; keep the current timestamp */
+    }
+  };
+
+  const onDrop = (event) => {
+    event.preventDefault();
+    setDragging(false);
+    const file = event.dataTransfer.files?.[0];
+    if (!file) return;
+    const input = fileInputRef.current;
+    if (input) {
+      const transfer = new DataTransfer();
+      transfer.items.add(file);
+      input.files = transfer.files;
+      evidenceRegister.onChange({ target: input, type: 'change' });
+    }
+    handleFileChosen(file);
+  };
 
   const buildFormData = (values, extra = {}) => {
     const file = values.evidence?.[0];
@@ -185,7 +284,7 @@ export default function UploadEvidence() {
     }
 
     if (!values.evidence?.[0]) {
-      setError('Evidence file is required.');
+      setError('A file is required.');
       return;
     }
 
@@ -207,139 +306,348 @@ export default function UploadEvidence() {
     [aiPreview]
   );
 
+  const activeIndex = STAGE_ORDER.indexOf(stage);
+  const busy = uploadMutation.isPending || chainMutation.isPending;
+
   return (
-    <div className="grid gap-5 xl:grid-cols-[1.1fr_.9fr]">
-      <form className="section-card" onSubmit={form.handleSubmit(submit)}>
-        <h1 className="mb-2 text-lg font-extrabold">Upload Evidence</h1>
-        <p className="mb-4 text-sm text-slate-400">
-          {isEmployee
-            ? 'Organization policy is applied to employee uploads. Suspicious files go to quarantine instead of trusted storage.'
-            : 'AI analysis and blockchain proof are optional. AI does not block storage for personal evidence.'}
-        </p>
+    <div className="space-y-6">
+      <PageHeader
+        eyebrow="Workspace"
+        title="Upload file"
+        subtitle={
+          isEmployee
+            ? 'Your organization policy is applied to employee uploads. Suspicious files are quarantined instead of stored as trusted.'
+            : 'Files are encrypted before storage. AI analysis and blockchain proof are optional.'
+        }
+      />
 
-        <div className="grid gap-4 md:grid-cols-2">
-          <input
-            ref={fileInputRef}
-            className="input py-2"
-            type="file"
-            accept="image/*,video/*,audio/*,.pdf"
-            {...evidenceRegister}
-            onChange={async (e) => {
-              evidenceRegister.onChange(e);
-              const file = e.target.files?.[0];
-              if (!file) return;
-              try {
-                const exif = await exifr.parse(file);
-                const source = exif?.DateTimeOriginal || file.lastModified;
-                if (!source) return;
-                const d = new Date(source);
-                form.setValue('capturedAt', new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16));
-              } catch {
-                /* ignore EXIF failures */
-              }
-            }}
-          />
-          <label>
-            <span className="label">Case ID</span>
-            <input className="input" {...form.register('caseId')} />
-          </label>
-          <label className="md:col-span-2">
-            <span className="label">Device Fingerprint</span>
-            <input className="input" readOnly {...form.register('deviceInfo')} />
-          </label>
-          <label>
-            <span className="label">Timestamp</span>
-            <input className="input" type="datetime-local" {...form.register('capturedAt')} />
-          </label>
+      <div className="grid gap-5 xl:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)]">
+        <form className="section-card" onSubmit={form.handleSubmit(submit)}>
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h2 className="section-title">File &amp; context</h2>
+              <p className="section-subtitle">The file and its capture details are stored together</p>
+            </div>
+            <span className="badge-brand">
+              <Lock size={11} />
+              Encrypted
+            </span>
+          </div>
+
+          <div className="mt-4">
+            <div
+              onDragOver={(event) => {
+                event.preventDefault();
+                setDragging(true);
+              }}
+              onDragLeave={() => setDragging(false)}
+              onDrop={onDrop}
+              className={`relative rounded-[11px] border-2 border-dashed px-5 py-8 text-center transition ${
+                dragging
+                  ? 'border-brand bg-brand-soft/60'
+                  : selectedFile
+                    ? 'border-[#c7e9dd] bg-success-soft/40'
+                    : 'border-line bg-[#FBFCFD] hover:border-[#d3d8e0]'
+              }`}
+            >
+              <input
+                ref={fileInputRef}
+                className="sr-only"
+                id="evidence-file"
+                type="file"
+                accept="image/*,video/*,audio/*,.pdf"
+                {...evidenceRegister}
+                onChange={async (event) => {
+                  evidenceRegister.onChange(event);
+                  await handleFileChosen(event.target.files?.[0]);
+                }}
+              />
+
+              {selectedFile ? (
+                <div className="flex flex-col items-center">
+                  <span className="grid h-11 w-11 place-items-center rounded-[11px] bg-success-soft text-success">
+                    <FileUp size={20} />
+                  </span>
+                  <p className="mt-3 max-w-full truncate text-[13.5px] font-medium text-ink">{selectedFile.name}</p>
+                  <p className="mt-0.5 text-[12px] text-ink-muted">
+                    {formatBytes(selectedFile.size)} · {selectedFile.type || 'Unknown type'}
+                  </p>
+                  <div className="mt-3 flex items-center gap-2">
+                    <label
+                      htmlFor="evidence-file"
+                      className="btn-secondary btn-sm cursor-pointer"
+                    >
+                      Choose another
+                    </label>
+                    <button
+                      type="button"
+                      className="btn-ghost btn-sm"
+                      onClick={() => {
+                        if (fileInputRef.current) fileInputRef.current.value = '';
+                        evidenceRegister.onChange({ target: { files: [] }, type: 'change' });
+                        setSelectedFile(null);
+                      }}
+                    >
+                      <X size={13} />
+                      Remove
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex flex-col items-center">
+                  <span className="grid h-11 w-11 place-items-center rounded-[11px] border border-line bg-card text-ink-muted shadow-card">
+                    <UploadCloud size={20} />
+                  </span>
+                  <p className="mt-3 text-[13.5px] font-medium text-ink">
+                    Drop a file here, or{' '}
+                    <label htmlFor="evidence-file" className="cursor-pointer text-brand underline-offset-2 hover:underline">
+                      browse
+                    </label>
+                  </p>
+                  <p className="mt-1 text-[12px] text-ink-faint">Images, video, audio, or PDF</p>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="mt-5 grid gap-4 sm:grid-cols-2">
+            <label className="block">
+              <span className="label">Case ID <span className="font-normal text-ink-faint">(optional)</span></span>
+              <input className="input" placeholder="CASE-2026-001" {...form.register('caseId')} />
+            </label>
+            <label className="block">
+              <span className="label">Captured at</span>
+              <input className="input" type="datetime-local" {...form.register('capturedAt')} />
+            </label>
+            <label className="block sm:col-span-2">
+              <span className="label">Device fingerprint</span>
+              <input className="input bg-[#FBFCFD] text-ink-muted" readOnly {...form.register('deviceInfo')} />
+              <span className="hint">Recorded automatically for the audit trail.</span>
+            </label>
+          </div>
+
+          <div className="mt-5 rounded-[10px] border border-line">
+            <div className="border-b border-line px-3.5 py-2.5">
+              <p className="text-[13px] font-medium text-ink">Security options</p>
+            </div>
+            <label className="flex items-start justify-between gap-4 px-3.5 py-3">
+              <span>
+                <span className="block text-[13px] text-ink">AI authenticity verification</span>
+                <span className="mt-0.5 block text-[12px] text-ink-faint">
+                  {aiRequired ? 'Required by your organization policy.' : 'Optional. Flags potential manipulation before storage.'}
+                </span>
+              </span>
+              <input
+                type="checkbox"
+                className="checkbox mt-0.5"
+                checked={aiEnabled}
+                disabled={aiRequired}
+                onChange={(event) => setRequestAI(event.target.checked)}
+              />
+            </label>
+            <label className="flex items-start justify-between gap-4 border-t border-line px-3.5 py-3">
+              <span>
+                <span className="block text-[13px] text-ink">Blockchain integrity proof</span>
+                <span className="mt-0.5 block text-[12px] text-ink-faint">
+                  {chainRequired ? 'Required by your organization policy.' : 'Optional. Records the file hash on-chain via MetaMask.'}
+                </span>
+              </span>
+              <input
+                type="checkbox"
+                className="checkbox mt-0.5"
+                checked={chainEnabled}
+                disabled={chainRequired}
+                onChange={(event) => setRequestBlockchain(event.target.checked)}
+              />
+            </label>
+          </div>
+
+          {error ? (
+            <div className="alert-danger mt-4" role="alert">
+              <AlertTriangle size={15} className="mt-0.5 shrink-0" />
+              <div className="flex-1">
+                <p className="font-medium">{error}</p>
+                {diagnostics ? (
+                  <div className="mt-3 text-xs space-y-2 border-t border-red-200 pt-2">
+                    <p className="font-semibold">Diagnostics:</p>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <p className="font-medium text-red-700">Frontend (MetaMask):</p>
+                        <p>Account: {diagnostics.frontend.connectedAccount.slice(0, 8)}...{diagnostics.frontend.connectedAccount.slice(-6)}</p>
+                        <p>Chain ID: {diagnostics.frontend.chainIdDecimal} (0x{diagnostics.frontend.chainId})</p>
+                      </div>
+                      <div>
+                        <p className="font-medium text-red-700">Backend (RPC):</p>
+                        <p>Balance: {diagnostics.backend.balance} ETH</p>
+                        <p>Chain ID: {diagnostics.backend.chainId}</p>
+                        <p>RPC: {diagnostics.backend.rpcUrl}</p>
+                      </div>
+                    </div>
+                    {diagnostics.frontend.chainIdDecimal !== diagnostics.backend.chainId ? (
+                      <p className="text-red-600 font-medium">⚠️ Chain ID mismatch! Frontend on {diagnostics.frontend.chainIdDecimal}, Backend on {diagnostics.backend.chainId}</p>
+                    ) : null}
+                    {parseFloat(diagnostics.backend.balance) === 0 ? (
+                      <p className="text-red-600 font-medium">⚠️ Account has 0 ETH on this network. Switch to a funded Hardhat account.</p>
+                    ) : null}
+                    {diagnostics.frontend.connectedAccount.toLowerCase() !== uploadResult?.uploaderWallet?.toLowerCase() ? (
+                      <p className="text-red-600 font-medium">⚠️ MetaMask account does not match evidence uploader. Switch to account: {uploadResult?.uploaderWallet?.slice(0, 8)}...</p>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
+
+          <div className="mt-5 flex flex-wrap items-center gap-3">
+            <button type="submit" className="btn-primary" disabled={busy}>
+              {uploadMutation.isPending ? <Loader2 className="animate-spin" size={15} /> : <ShieldCheck size={15} />}
+              {uploadMutation.isPending ? 'Securing file…' : 'Secure file'}
+            </button>
+            <p className="text-[12px] text-ink-faint">
+              Encryption happens before the file leaves the application.
+            </p>
+          </div>
+        </form>
+
+        <div className="space-y-5">
+          <section className="section-card">
+            <h2 className="section-title">Pipeline</h2>
+            <p className="section-subtitle">Where this upload is right now</p>
+
+            <ol className="mt-4 space-y-0">
+              {STAGE_ORDER.map((step, index) => {
+                const done = index < activeIndex || stage === 'complete';
+                const active = step === stage && stage !== 'complete';
+                const copy = STAGE_COPY[step];
+                return (
+                  <li key={step} className="relative flex gap-3 pb-4 last:pb-0">
+                    {index < STAGE_ORDER.length - 1 ? (
+                      <span
+                        className={`absolute left-[11px] top-6 h-full w-px ${done ? 'bg-success/40' : 'bg-line'}`}
+                        aria-hidden="true"
+                      />
+                    ) : null}
+                    <span
+                      className={`relative z-10 mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-full border ${
+                        done
+                          ? 'border-success bg-success text-white'
+                          : active
+                            ? 'border-brand bg-brand-soft text-brand'
+                            : 'border-line bg-card text-ink-faint'
+                      }`}
+                    >
+                      {done ? <Check size={12} /> : active ? <Loader2 size={12} className="animate-spin" /> : <Circle size={6} fill="currentColor" />}
+                    </span>
+                    <div className="min-w-0">
+                      <p className={`text-[13px] font-medium ${active ? 'text-brand' : done ? 'text-ink' : 'text-ink-muted'}`}>
+                        {copy.title}
+                      </p>
+                      <p className="mt-0.5 text-[12px] leading-5 text-ink-faint">{copy.detail}</p>
+                    </div>
+                  </li>
+                );
+              })}
+            </ol>
+          </section>
+
+          {aiPreview?.requested ? (
+            <section className={`section-card ${suspicious ? 'border-[#f0dfbd]' : 'border-[#c7e9dd]'}`}>
+              <div className="flex items-start justify-between gap-3">
+                <h2 className="section-title">AI assessment</h2>
+                <StatusBadge status={suspicious ? 'quarantine' : 'approved'} label={suspicious ? 'Flagged' : 'Completed'} />
+              </div>
+              <p className="mt-2 text-[13px] leading-6 text-ink-muted">{aiPreview.explanation}</p>
+
+              <dl className="mt-3 grid grid-cols-3 gap-2">
+                {[
+                  ['Authenticity', aiPreview.authenticityScore ?? aiPreview.score],
+                  ['Tampering', aiPreview.tamperingScore ?? 0],
+                  ['Deepfake', aiPreview.deepfakeScore ?? 0]
+                ].map(([label, value]) => (
+                  <div key={label} className="rounded-[9px] border border-line bg-[#FBFCFD] px-2.5 py-2">
+                    <dt className="text-[11px] text-ink-faint">{label}</dt>
+                    <dd className="mt-0.5 text-[15px] font-semibold text-ink">{value}%</dd>
+                  </div>
+                ))}
+              </dl>
+
+              <p className="mt-3 text-[11.5px] leading-5 text-ink-faint">
+                Automated analysis should not be treated as absolute proof.
+              </p>
+
+              {!uploadResult && !isEmployee && aiPreview?.requested ? (
+                <button type="button" className="btn-primary btn-sm mt-3" onClick={storeAnyway} disabled={uploadMutation.isPending}>
+                  {suspicious ? 'Store anyway' : 'Continue and store'}
+                  <ArrowRight size={13} />
+                </button>
+              ) : null}
+
+              {uploadResult?.status === 'quarantine' ? (
+                <p className="alert-warn mt-3">Submitted for administrator review.</p>
+              ) : null}
+            </section>
+          ) : null}
+
+          {uploadResult ? (
+            <section className="section-card">
+              <div className="flex items-start justify-between gap-3">
+                <h2 className="section-title">Result</h2>
+                <StatusBadge status={uploadResult.status} />
+              </div>
+              {uploadResult.statusMessage ? (
+                <p className="mt-2 text-[13px] leading-5 text-ink-muted">{uploadResult.statusMessage}</p>
+              ) : null}
+
+              <dl className="mt-4 space-y-3">
+                <div>
+                  <dt className="detail-label">File ID</dt>
+                  <dd className="mt-0.5"><HashValue value={uploadResult.evidenceId || uploadResult.quarantineId} compact={false} /></dd>
+                </div>
+                <div>
+                  <dt className="detail-label">File hash</dt>
+                  <dd className="mt-0.5"><HashValue value={uploadResult.fileHash} compact={false} /></dd>
+                </div>
+                {uploadResult.ipfsCID ? (
+                  <div>
+                    <dt className="detail-label">IPFS CID</dt>
+                    <dd className="mt-0.5"><HashValue value={uploadResult.ipfsCID} compact={false} /></dd>
+                  </div>
+                ) : null}
+                {txHash ? (
+                  <div>
+                    <dt className="detail-label">Transaction hash</dt>
+                    <dd className="mt-0.5"><HashValue value={txHash} compact={false} /></dd>
+                  </div>
+                ) : null}
+              </dl>
+
+              {uploadResult.blockchainPayload && !txHash ? (
+                <button
+                  type="button"
+                  className="btn-primary mt-4 w-full"
+                  onClick={() => {
+                    if (uploadResult.blockchainStatus === 'failed') {
+                      retryMutation.mutate(uploadResult.evidenceId);
+                    } else {
+                      chainMutation.mutate(uploadResult);
+                    }
+                  }}
+                  disabled={chainMutation.isPending || retryMutation.isPending || !EVIDENCE_CONTRACT_ADDRESS}
+                >
+                  {(chainMutation.isPending || retryMutation.isPending) ? <Loader2 className="animate-spin" size={15} /> : <ShieldCheck size={15} />}
+                  {uploadResult.blockchainStatus === 'failed' ? 'Retry blockchain proof' : 'Confirm with MetaMask'}
+                </button>
+              ) : null}
+
+              {uploadResult.status === 'complete' || uploadResult.storageStatus === 'ipfs' ? (
+                <p className="mt-3 flex items-center gap-1.5 text-[13px] text-success">
+                  <CheckCircle2 size={14} />
+                  Storage complete.
+                </p>
+              ) : null}
+            </section>
+          ) : null}
         </div>
-
-        <div className="mt-5 rounded-xl border border-slate-700/50 bg-slate-900/40 p-4">
-          <p className="mb-3 text-sm font-semibold text-white">Security options</p>
-          <label className="mb-3 flex items-center justify-between gap-3 text-sm text-slate-300">
-            <span>AI authenticity verification {aiRequired ? '(required by organization policy)' : ''}</span>
-            <input
-              type="checkbox"
-              checked={aiEnabled}
-              disabled={aiRequired}
-              onChange={(event) => setRequestAI(event.target.checked)}
-            />
-          </label>
-          <label className="flex items-center justify-between gap-3 text-sm text-slate-300">
-            <span>Blockchain integrity proof {chainRequired ? '(required by organization policy)' : ''}</span>
-            <input
-              type="checkbox"
-              checked={chainEnabled}
-              disabled={chainRequired}
-              onChange={(event) => setRequestBlockchain(event.target.checked)}
-            />
-          </label>
-        </div>
-
-        {error ? (
-          <div className="mt-4 border border-red-400/50 bg-red-950/30 p-3 text-sm text-red-200">
-            <div className="flex gap-2"><AlertTriangle size={18} /><span>{error}</span></div>
-          </div>
-        ) : null}
-
-        <div className="mt-5">
-          <button type="submit" className="btn-primary" disabled={uploadMutation.isPending || chainMutation.isPending}>
-            {uploadMutation.isPending ? <Loader2 className="animate-spin" size={16} /> : <UploadCloud size={16} />}
-            Secure Evidence
-          </button>
-        </div>
-      </form>
-
-      <div className="section-card">
-        <h2 className="mb-4 text-base font-bold">Pipeline</h2>
-        {['collect', 'upload', 'ai', 'chain', 'finalize', 'complete'].map((step) => (
-          <div key={step} className={`mb-2 flex items-center gap-3 border p-3 ${stage === step ? 'border-sky-400 bg-sky-400/10' : 'border-slate-800'}`}>
-            <span className="text-sm capitalize text-slate-200">{step}</span>
-          </div>
-        ))}
-
-        {aiPreview?.requested ? (
-          <div className={`mt-4 rounded-xl border p-4 ${suspicious ? 'border-amber-500/40 bg-amber-950/20' : 'border-emerald-500/30 bg-emerald-950/20'}`}>
-            <p className="font-semibold text-white">{suspicious ? 'Potential Manipulation Detected' : 'AI Assessment'}</p>
-            <p className="mt-2 text-sm text-slate-300">{aiPreview.explanation}</p>
-            <p className="mt-3 text-sm text-slate-400">Authenticity: {aiPreview.authenticityScore ?? aiPreview.score}%</p>
-            <p className="text-sm text-slate-400">Tampering: {aiPreview.tamperingScore ?? 0}%</p>
-            <p className="text-sm text-slate-400">Deepfake: {aiPreview.deepfakeScore ?? 0}%</p>
-            <p className="mt-3 text-xs text-slate-500">This result is an automated analysis and should not be treated as absolute proof.</p>
-            {suspicious && !uploadResult && !isEmployee ? (
-              <button type="button" className="btn-primary mt-4" onClick={storeAnyway} disabled={uploadMutation.isPending}>
-                Store Anyway
-              </button>
-            ) : null}
-            {!suspicious && !uploadResult && !isEmployee && aiPreview?.requested ? (
-              <button type="button" className="btn-primary mt-4" onClick={storeAnyway} disabled={uploadMutation.isPending}>
-                Continue and Store
-              </button>
-            ) : null}
-            {uploadResult?.status === 'quarantine' ? (
-              <p className="mt-3 text-sm text-amber-200">Submitted for admin review.</p>
-            ) : null}
-          </div>
-        ) : null}
-
-        {uploadResult ? (
-          <div className="mt-5 grid gap-3">
-            <StatusBadge status={uploadResult.status} />
-            <p className="text-xs text-slate-400">{uploadResult.statusMessage}</p>
-            <div><p className="label">Evidence ID</p><HashValue value={uploadResult.evidenceId || uploadResult.quarantineId} compact={false} /></div>
-            <div><p className="label">File Hash</p><HashValue value={uploadResult.fileHash} compact={false} /></div>
-            {uploadResult.ipfsCID ? <div><p className="label">IPFS CID</p><HashValue value={uploadResult.ipfsCID} compact={false} /></div> : null}
-            {txHash ? <div><p className="label">Tx Hash</p><HashValue value={txHash} compact={false} /></div> : null}
-            {uploadResult.blockchainPayload && !txHash ? (
-              <button type="button" className="btn-primary w-full" onClick={() => chainMutation.mutate(uploadResult)} disabled={chainMutation.isPending || !EVIDENCE_CONTRACT_ADDRESS}>
-                {chainMutation.isPending ? <Loader2 className="animate-spin" size={16} /> : <ShieldCheck size={16} />}
-                Confirm With MetaMask
-              </button>
-            ) : null}
-            {uploadResult.status === 'complete' || uploadResult.storageStatus === 'ipfs' ? (
-              <p className="flex gap-2 text-sm text-emerald-300"><CheckCircle2 size={16} /> Storage complete.</p>
-            ) : null}
-          </div>
-        ) : null}
       </div>
     </div>
   );

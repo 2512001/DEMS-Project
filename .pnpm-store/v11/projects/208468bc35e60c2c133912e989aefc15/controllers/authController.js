@@ -84,7 +84,8 @@ const verifySignature = async (req, res, next) => {
             id: user._id.toString(),
             role: user.role,
             walletAddress: user.walletAddress,
-            organizationId: user.organizationId ? user.organizationId.toString() : null
+            organizationId: user.organizationId ? user.organizationId.toString() : null,
+            profile: user.profile || {}
         };
 
         const token = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: process.env.JWT_EXPIRES_IN || '1d' });
@@ -121,7 +122,7 @@ const getMe = async (req, res, next) => {
             return res.status(404).json({ success: false, message: 'User not found.' });
         }
 
-        console.log('[AUTH] /me - User role:', user.role, 'organizationId:', user.organizationId);
+        console.log('[AUTH] /me - User role:', user.role, 'organizationId:', user.organizationId, 'emailVerified:', user.profile?.emailVerified);
 
         return res.status(200).json({ success: true, user });
     } catch (err) {
@@ -131,21 +132,33 @@ const getMe = async (req, res, next) => {
 
 const updateProfile = async (req, res, next) => {
     try {
-        const profile = {
-            displayName: String(req.body.displayName || '').trim().slice(0, 120),
-            email: String(req.body.email || '').trim().slice(0, 160)
+        const user = await User.findById(req.user.id);
+        if (!user) {
+            return res.status(404).json({ success: false, message: 'User not found.' });
+        }
+
+        const existingProfile = user.profile?.toObject?.() || user.profile || {};
+        const displayName = String(req.body.displayName ?? existingProfile.displayName ?? '').trim().slice(0, 120);
+        const nextEmail = req.body.email !== undefined
+            ? String(req.body.email).trim().slice(0, 160)
+            : (existingProfile.email || '');
+        const emailChanged = nextEmail.toLowerCase() !== String(existingProfile.email || '').toLowerCase();
+
+        // SECURITY: Never allow role, organization, or membership changes through profile updates.
+        // Merge instead of overwrite so phone/department/verification flags are preserved.
+        user.profile = {
+            ...existingProfile,
+            displayName,
+            email: nextEmail,
+            // Re-verification is required if the email address itself changes.
+            ...(emailChanged ? { emailVerified: false, emailVerifiedAt: null } : {})
         };
+        await user.save();
 
-        // SECURITY: Never allow role changes through profile updates
-        const updates = { $set: { profile } };
+        const safeUser = await User.findById(req.user.id)
+            .select('_id walletAddress role organizationId profile officerVerification createdAt updatedAt');
 
-        const user = await User.findByIdAndUpdate(
-            req.user.id,
-            updates,
-            { new: true }
-        ).select('_id walletAddress role organizationId profile officerVerification createdAt updatedAt');
-
-        return res.status(200).json({ success: true, message: 'Profile updated.', user });
+        return res.status(200).json({ success: true, message: 'Profile updated.', user: safeUser });
     } catch (err) {
         next(err);
     }

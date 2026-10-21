@@ -10,6 +10,27 @@ const OTP_MAX_RESEND_ATTEMPTS = 5;
 // In-memory OTP storage (in production, use Redis or database)
 const otpStore = new Map();
 
+// Tracks emails that have completed OTP verification, so verification state
+// (EMAIL_VERIFIED) is a distinct, server-side fact from merely having an OTP
+// issued (EMAIL_SENT). Entries expire so the signal cannot be relied on forever.
+const verifiedEmailStore = new Map();
+const VERIFIED_EMAIL_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+function markEmailVerified(email) {
+    verifiedEmailStore.set(String(email || '').toLowerCase(), Date.now());
+}
+
+function isEmailVerified(email) {
+    const key = String(email || '').toLowerCase();
+    const verifiedAt = verifiedEmailStore.get(key);
+    if (!verifiedAt) return false;
+    if (Date.now() - verifiedAt > VERIFIED_EMAIL_TTL_MS) {
+        verifiedEmailStore.delete(key);
+        return false;
+    }
+    return true;
+}
+
 function generateSecureOTP() {
     // Generate a 6-digit OTP
     return crypto.randomInt(100000, 999999).toString();
@@ -138,6 +159,8 @@ module.exports = {
     canResendOTP,
     resendOTP,
     getUserOTPStatus,
+    markEmailVerified,
+    isEmailVerified,
     OTP_EXPIRY_MINUTES,
     OTP_MAX_ATTEMPTS,
     OTP_RESEND_COOLDOWN_SECONDS

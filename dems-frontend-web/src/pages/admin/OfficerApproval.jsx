@@ -1,34 +1,52 @@
 import React, { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { BadgeCheck, XCircle, Eye, AlertTriangle, FileText, User } from 'lucide-react';
-import { getVerificationRequests, reviewVerificationRequest, reviewMembershipApplication, upgradeOfficer } from '../../api/admin.js';
+import { BadgeCheck, Eye, FileText, User, XCircle } from 'lucide-react';
+import { getVerificationRequests, reviewVerificationRequest, reviewMembershipApplication } from '../../api/admin.js';
 import HashValue from '../../components/HashValue.jsx';
 import StatusBadge from '../../components/StatusBadge.jsx';
-import { formatDate } from '../../utils/format.js';
+import PageHeader from '../../components/ui/PageHeader.jsx';
+import EmptyState from '../../components/ui/EmptyState.jsx';
+import { CardsSkeleton } from '../../components/ui/Skeleton.jsx';
+import { formatDate, formatRelativeTime } from '../../utils/format.js';
+import { useToast } from '../../components/ui/Toast.jsx';
+
+function isMembershipApplication(user) {
+  return user.membershipStatus === 'pending_approval';
+}
 
 export default function OfficerApproval() {
   const queryClient = useQueryClient();
-  const [manualWallet, setManualWallet] = useState('');
+  const { push } = useToast();
   const [selectedUser, setSelectedUser] = useState(null);
-  const { data, isLoading } = useQuery({ queryKey: ['verification-requests'], queryFn: getVerificationRequests });
+  const { data, isLoading, isError, refetch } = useQuery({
+    queryKey: ['verification-requests'],
+    queryFn: getVerificationRequests
+  });
+
   const review = useMutation({
     mutationFn: reviewVerificationRequest,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['verification-requests'] });
+      queryClient.invalidateQueries({ queryKey: ['org-overview'] });
+      push('Verification request updated.', { tone: 'success' });
       setSelectedUser(null);
-    }
+    },
+    onError: (err) => push(err?.response?.data?.message || 'Review failed.', { tone: 'error' })
   });
+
   const reviewMembership = useMutation({
     mutationFn: reviewMembershipApplication,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['verification-requests'] });
+      queryClient.invalidateQueries({ queryKey: ['org-overview'] });
+      push('Membership application updated.', { tone: 'success' });
       setSelectedUser(null);
-    }
+    },
+    onError: (err) => push(err?.response?.data?.message || 'Review failed.', { tone: 'error' })
   });
-  const manualUpgrade = useMutation({ mutationFn: upgradeOfficer });
 
   const handleApprove = (user) => {
-    if (user.membershipStatus === 'pending_approval') {
+    if (isMembershipApplication(user)) {
       reviewMembership.mutate({ userId: user._id, status: 'approved' });
     } else {
       review.mutate({ walletAddress: user.walletAddress, status: 'approved' });
@@ -36,244 +54,202 @@ export default function OfficerApproval() {
   };
 
   const handleReject = (user) => {
-    if (user.membershipStatus === 'pending_approval') {
+    if (isMembershipApplication(user)) {
       reviewMembership.mutate({ userId: user._id, status: 'rejected', rejectionReason: 'Rejected by admin review.' });
     } else {
       review.mutate({ walletAddress: user.walletAddress, status: 'rejected', rejectionReason: 'Rejected by admin review.' });
     }
   };
 
-  const isMembershipApplication = (user) => user.membershipStatus === 'pending_approval';
+  const requests = data?.data || [];
+  const busy = review.isPending || reviewMembership.isPending;
 
-  return (
-    <div className="grid gap-5">
-      <div className="section-card">
-        <h1 className="mb-2 text-2xl font-extrabold">Employee Approval</h1>
-        <p className="text-sm text-slate-400">Review and approve employee verification requests for your organization</p>
-      </div>
-      
-      <div className="grid gap-4">
-        {isLoading ? <div className="section-card text-slate-400">Loading requests...</div> : null}
-        
-        {selectedUser ? (
-          <div className="section-card">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-bold">Review Application</h2>
-              <button 
-                className="text-sm text-slate-400 hover:text-white"
-                onClick={() => setSelectedUser(null)}
-              >
-                ← Back to list
+  if (selectedUser) {
+    return (
+      <div className="space-y-6">
+        <PageHeader
+          eyebrow="Organization"
+          title="Review application"
+          subtitle={isMembershipApplication(selectedUser)
+            ? 'Invitation-based employee membership application'
+            : 'Legacy verification request'}
+          actions={
+            <button type="button" className="btn-secondary" onClick={() => setSelectedUser(null)}>
+              Back to requests
+            </button>
+          }
+        />
+
+        <div className="grid gap-5 xl:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)]">
+          <section className="section-card">
+            <h2 className="section-title">Applicant</h2>
+            <p className="section-subtitle">Identity and organization details</p>
+
+            <dl className="mt-4 grid gap-4 sm:grid-cols-2">
+              <div className="sm:col-span-2">
+                <dt className="detail-label">Wallet address</dt>
+                <dd className="mt-1"><HashValue value={selectedUser.walletAddress} compact={false} /></dd>
+              </div>
+              <div>
+                <dt className="detail-label">Display name</dt>
+                <dd className="detail-value">{selectedUser.profile?.displayName || 'N/A'}</dd>
+              </div>
+              <div>
+                <dt className="detail-label">Email</dt>
+                <dd className="detail-value">{selectedUser.profile?.email || 'N/A'}</dd>
+              </div>
+              <div>
+                <dt className="detail-label">Department</dt>
+                <dd className="detail-value">{selectedUser.profile?.department || 'N/A'}</dd>
+              </div>
+              <div>
+                <dt className="detail-label">Designation</dt>
+                <dd className="detail-value">{selectedUser.profile?.designation || 'N/A'}</dd>
+              </div>
+              <div>
+                <dt className="detail-label">Employee ID</dt>
+                <dd className="detail-value">{selectedUser.profile?.employeeId || 'N/A'}</dd>
+              </div>
+              <div>
+                <dt className="detail-label">Phone</dt>
+                <dd className="detail-value">{selectedUser.profile?.phone || 'N/A'}</dd>
+              </div>
+              {!isMembershipApplication(selectedUser) ? (
+                <>
+                  <div>
+                    <dt className="detail-label">Badge number</dt>
+                    <dd className="detail-value">{selectedUser.officerVerification?.badgeNumber || 'N/A'}</dd>
+                  </div>
+                  <div>
+                    <dt className="detail-label">Government ID</dt>
+                    <dd className="detail-value">{selectedUser.officerVerification?.governmentIdNumber || 'N/A'}</dd>
+                  </div>
+                  <div>
+                    <dt className="detail-label">Submitted</dt>
+                    <dd className="detail-value">{formatDate(selectedUser.officerVerification?.requestedAt)}</dd>
+                  </div>
+                </>
+              ) : null}
+            </dl>
+          </section>
+
+          <section className="section-card">
+            <h2 className="section-title">Submitted documents</h2>
+            <p className="section-subtitle">Files provided during the application</p>
+
+            {selectedUser.officerVerification?.documents?.length ? (
+              <ul className="mt-4 divide-y divide-line rounded-[10px] border border-line">
+                {selectedUser.officerVerification.documents.map((doc, index) => (
+                  <li key={index} className="flex items-center justify-between gap-3 px-3 py-2.5">
+                    <div className="flex min-w-0 items-center gap-2.5">
+                      <span className="grid h-7 w-7 shrink-0 place-items-center rounded-[7px] bg-surface text-ink-muted">
+                        <FileText size={13} />
+                      </span>
+                      <div className="min-w-0">
+                        <p className="truncate text-[12.5px] font-medium text-ink">{doc.originalName}</p>
+                        <p className="text-[11px] text-ink-faint">{((doc.size || 0) / 1024).toFixed(1)} KB</p>
+                      </div>
+                    </div>
+                    <span className="shrink-0 text-[11.5px] text-ink-faint">
+                      <Eye size={13} className="inline" /> attached
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="mt-4 text-[13px] text-ink-muted">No documents were submitted.</p>
+            )}
+
+            <div className="mt-4 flex flex-wrap gap-2 border-t border-line pt-4">
+              <button type="button" className="btn-primary" onClick={() => handleApprove(selectedUser)} disabled={busy}>
+                <BadgeCheck size={14} />
+                Approve employee
+              </button>
+              <button type="button" className="btn-secondary text-danger" onClick={() => handleReject(selectedUser)} disabled={busy}>
+                <XCircle size={14} />
+                Reject
               </button>
             </div>
-            
-            <div className="space-y-4">
-              <div>
-                <p className="label">Wallet Address</p>
-                <HashValue value={selectedUser.walletAddress} compact={false} />
-              </div>
-
-              {isMembershipApplication(selectedUser) ? (
-                <>
-                  <div className="grid gap-3 md:grid-cols-2">
-                    <div>
-                      <p className="label">Display Name</p>
-                      <p className="text-slate-300">{selectedUser.profile?.displayName || 'N/A'}</p>
-                    </div>
-                    <div>
-                      <p className="label">Email</p>
-                      <p className="text-slate-300">{selectedUser.profile?.email || 'N/A'}</p>
-                    </div>
-                    <div>
-                      <p className="label">Department</p>
-                      <p className="text-slate-300">{selectedUser.profile?.department || 'N/A'}</p>
-                    </div>
-                    <div>
-                      <p className="label">Designation</p>
-                      <p className="text-slate-300">{selectedUser.profile?.designation || 'N/A'}</p>
-                    </div>
-                    <div>
-                      <p className="label">Employee ID</p>
-                      <p className="text-slate-300">{selectedUser.profile?.employeeId || 'N/A'}</p>
-                    </div>
-                    <div>
-                      <p className="label">Phone</p>
-                      <p className="text-slate-300">{selectedUser.profile?.phone || 'N/A'}</p>
-                    </div>
-                  </div>
-
-                  <div>
-                    <p className="label mb-2">Submitted Documents</p>
-                    {selectedUser.officerVerification?.documents?.length > 0 ? (
-                      <div className="space-y-2">
-                        {selectedUser.officerVerification.documents.map((doc, idx) => (
-                          <div key={idx} className="flex items-center justify-between p-3 rounded-lg border border-slate-700">
-                            <div>
-                              <p className="text-sm text-slate-300">{doc.originalName}</p>
-                              <p className="text-xs text-slate-500">{(doc.size / 1024).toFixed(1)} KB</p>
-                            </div>
-                            <button className="text-sm text-sky-400 hover:text-sky-300 flex items-center gap-1">
-                              <Eye size={14} /> View
-                            </button>
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <p className="text-sm text-slate-500">No documents submitted</p>
-                    )}
-                  </div>
-
-                  <div className="p-3 rounded-lg border border-amber-500/30 bg-amber-950/20">
-                    <p className="text-sm text-amber-300">
-                      <User size={14} className="inline mr-2" />
-                      This is an invitation-based employee application
-                    </p>
-                  </div>
-                </>
-              ) : (
-                <>
-                  <div className="grid gap-3 md:grid-cols-3">
-                    <div>
-                      <p className="label">Badge Number</p>
-                      <p className="text-slate-300">{selectedUser.officerVerification?.badgeNumber || 'N/A'}</p>
-                    </div>
-                    <div>
-                      <p className="label">Government ID</p>
-                      <p className="text-slate-300">{selectedUser.officerVerification?.governmentIdNumber || 'N/A'}</p>
-                    </div>
-                    <div>
-                      <p className="label">Submitted</p>
-                      <p className="text-slate-300">{formatDate(selectedUser.officerVerification?.requestedAt)}</p>
-                    </div>
-                  </div>
-
-                  <div>
-                    <p className="label mb-2">Submitted Documents</p>
-                    {selectedUser.officerVerification?.documents?.length > 0 ? (
-                      <div className="space-y-2">
-                        {selectedUser.officerVerification.documents.map((doc, idx) => (
-                          <div key={idx} className="flex items-center justify-between p-3 rounded-lg border border-slate-700">
-                            <div>
-                              <p className="text-sm text-slate-300">{doc.originalName}</p>
-                              <p className="text-xs text-slate-500">{(doc.size / 1024).toFixed(1)} KB</p>
-                            </div>
-                            <button className="text-sm text-sky-400 hover:text-sky-300 flex items-center gap-1">
-                              <Eye size={14} /> View
-                            </button>
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <p className="text-sm text-slate-500">No documents submitted</p>
-                    )}
-                  </div>
-
-                  <div className="p-3 rounded-lg border border-slate-500/30 bg-slate-950/20">
-                    <p className="text-sm text-slate-300">
-                      <FileText size={14} className="inline mr-2" />
-                      This is a legacy verification request
-                    </p>
-                  </div>
-                </>
-              )}
-
-              <div className="flex flex-wrap gap-3 pt-4 border-t border-slate-700">
-                <button 
-                  className="btn-primary" 
-                  onClick={() => handleApprove(selectedUser)}
-                  disabled={review.isPending || reviewMembership.isPending}
-                >
-                  <BadgeCheck size={16} /> Approve Employee
-                </button>
-                <button 
-                  className="btn-secondary" 
-                  onClick={() => handleReject(selectedUser)}
-                  disabled={review.isPending || reviewMembership.isPending}
-                >
-                  <XCircle size={16} /> Reject
-                </button>
-              </div>
-            </div>
-          </div>
-        ) : (
-          <>
-            {(data?.data || []).map((user) => (
-              <div className="section-card" key={user._id}>
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div>
-                    <HashValue value={user.walletAddress} compact={false} />
-                    {isMembershipApplication(user) ? (
-                      <p className="mt-2 text-sm text-slate-400">
-                        {user.profile?.displayName || 'Unknown'} • {user.profile?.email || 'No email'}
-                      </p>
-                    ) : (
-                      <p className="mt-2 text-sm text-slate-400">Submitted {formatDate(user.officerVerification?.requestedAt)}</p>
-                    )}
-                  </div>
-                  <StatusBadge status={isMembershipApplication(user) ? user.membershipStatus : user.officerVerification?.status} />
-                </div>
-                
-                {isMembershipApplication(user) ? (
-                  <div className="mt-4 grid gap-3 md:grid-cols-3">
-                    <p><span className="label">Name</span>{user.profile?.displayName || 'N/A'}</p>
-                    <p><span className="label">Email</span>{user.profile?.email || 'N/A'}</p>
-                    <p><span className="label">Position</span>{user.profile?.designation || 'N/A'}</p>
-                    <p><span className="label">Department</span>{user.profile?.department || 'N/A'}</p>
-                    <p><span className="label">Employee ID</span>{user.profile?.employeeId || 'N/A'}</p>
-                    <p><span className="label">Documents</span>{user.officerVerification?.documents?.length || 0} files</p>
-                  </div>
-                ) : (
-                  <div className="mt-4 grid gap-3 md:grid-cols-3">
-                    <p><span className="label">Badge</span>{user.officerVerification?.badgeNumber || 'N/A'}</p>
-                    <p><span className="label">Government ID</span>{user.officerVerification?.governmentIdNumber || 'N/A'}</p>
-                    <p><span className="label">Documents</span>{user.officerVerification?.documents?.length || 0} files</p>
-                  </div>
-                )}
-                
-                <div className="mt-4 flex flex-wrap gap-3">
-                  <button 
-                    className="btn-secondary" 
-                    onClick={() => setSelectedUser(user)}
-                  >
-                    <Eye size={16} /> Review Documents
-                  </button>
-                  <button 
-                    className="btn-primary" 
-                    onClick={() => handleApprove(user)}
-                    disabled={review.isPending || reviewMembership.isPending}
-                  >
-                    <BadgeCheck size={16} /> Approve
-                  </button>
-                  <button 
-                    className="btn-secondary text-red-400 hover:text-red-300" 
-                    onClick={() => handleReject(user)}
-                    disabled={review.isPending || reviewMembership.isPending}
-                  >
-                    <XCircle size={16} /> Reject
-                  </button>
-                </div>
-              </div>
-            ))}
-            {!isLoading && !data?.data?.length ? (
-              <div className="section-card text-slate-400">
-                <div className="flex items-center justify-center gap-3 py-8">
-                  <AlertTriangle size={24} className="text-slate-500" />
-                  <p>No pending employee verification requests.</p>
-                </div>
-              </div>
-            ) : null}
-          </>
-        )}
-      </div>
-
-      <div className="section-card">
-        <h2 className="mb-3 text-xl font-bold">Manual Compatibility Upgrade</h2>
-        <p className="text-sm text-slate-400 mb-3">⚠️ Development tool - bypasses verification process</p>
-        <div className="flex gap-3 max-sm:flex-col">
-          <input className="input" value={manualWallet} onChange={(event) => setManualWallet(event.target.value)} placeholder="0x..." />
-          <button className="btn-secondary" onClick={() => manualUpgrade.mutate(manualWallet)} disabled={!manualWallet}>Upgrade</button>
+          </section>
         </div>
       </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <PageHeader
+        eyebrow="Organization"
+        title="Employee approval"
+        subtitle="Review employee membership applications and verification requests for your organization."
+      />
+
+      {isLoading ? (
+        <CardsSkeleton count={3} />
+      ) : isError ? (
+        <div className="section-card">
+          <div className="alert-danger">Verification requests could not be loaded.</div>
+          <button type="button" className="btn-secondary btn-sm mt-3" onClick={() => refetch()}>Retry</button>
+        </div>
+      ) : requests.length === 0 ? (
+        <EmptyState
+          icon={User}
+          title="No pending requests"
+          description="New employee applications and verification requests will appear here."
+        />
+      ) : (
+        <div className="space-y-3">
+          {requests.map((user) => (
+            <section key={user._id} className="section-card">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="text-[14px] font-semibold text-ink">
+                      {user.profile?.displayName || 'Unknown applicant'}
+                    </p>
+                    <StatusBadge status={isMembershipApplication(user) ? user.membershipStatus : user.officerVerification?.status} />
+                  </div>
+                  <p className="mt-1 text-[12.5px] text-ink-muted">
+                    {user.profile?.email || 'No email'} ·{' '}
+                    {isMembershipApplication(user)
+                      ? `Applied ${formatRelativeTime(user.officerVerification?.requestedAt)}`
+                      : `Submitted ${formatDate(user.officerVerification?.requestedAt)}`}
+                  </p>
+                  <div className="mt-1.5"><HashValue value={user.walletAddress} compact /></div>
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  <button type="button" className="btn-secondary btn-sm" onClick={() => setSelectedUser(user)}>
+                    <Eye size={13} />
+                    Review
+                  </button>
+                  <button type="button" className="btn-primary btn-sm" onClick={() => handleApprove(user)} disabled={busy}>
+                    <BadgeCheck size={13} />
+                    Approve
+                  </button>
+                </div>
+              </div>
+
+              <dl className="mt-4 grid gap-3 border-t border-line pt-4 sm:grid-cols-2 lg:grid-cols-4">
+                {isMembershipApplication(user) ? (
+                  <>
+                    <div><dt className="detail-label">Department</dt><dd className="detail-value">{user.profile?.department || 'N/A'}</dd></div>
+                    <div><dt className="detail-label">Position</dt><dd className="detail-value">{user.profile?.designation || 'N/A'}</dd></div>
+                    <div><dt className="detail-label">Employee ID</dt><dd className="detail-value">{user.profile?.employeeId || 'N/A'}</dd></div>
+                    <div><dt className="detail-label">Documents</dt><dd className="detail-value">{user.officerVerification?.documents?.length || 0} files</dd></div>
+                  </>
+                ) : (
+                  <>
+                    <div><dt className="detail-label">Badge</dt><dd className="detail-value">{user.officerVerification?.badgeNumber || 'N/A'}</dd></div>
+                    <div><dt className="detail-label">Government ID</dt><dd className="detail-value">{user.officerVerification?.governmentIdNumber || 'N/A'}</dd></div>
+                    <div><dt className="detail-label">Documents</dt><dd className="detail-value">{user.officerVerification?.documents?.length || 0} files</dd></div>
+                  </>
+                )}
+              </dl>
+            </section>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

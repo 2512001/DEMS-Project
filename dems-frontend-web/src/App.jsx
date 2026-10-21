@@ -7,6 +7,7 @@ import LandingPage from './pages/public/LandingPage.jsx';
 import About from './pages/public/About.jsx';
 import Features from './pages/public/Features.jsx';
 import WalletLogin from './pages/auth/WalletLogin.jsx';
+import EmailVerificationSetup from './pages/auth/EmailVerificationSetup.jsx';
 import CitizenDashboard from './pages/citizen/Dashboard.jsx';
 import EvidenceVault from './pages/citizen/EvidenceVault.jsx';
 import EvidenceDetails from './pages/citizen/EvidenceDetails.jsx';
@@ -39,6 +40,10 @@ export default function App() {
         <Route path="/public/features" element={<Features />} />
         <Route path="/auth/wallet-login" element={<WalletLogin />} />
         <Route path="/auth" element={<Navigate to="/auth/wallet-login" replace />} />
+      </Route>
+
+      <Route element={<RequireAuth />}>
+        <Route path="/auth/email-verification" element={<EmailVerificationSetup />} />
       </Route>
 
       <Route element={<RequireAuth roles={['citizen', 'officer', 'admin']} />}>
@@ -88,9 +93,6 @@ export default function App() {
       {/* Public invitation routes */}
       <Route path="/invitation/admin/:token" element={<AdminInvitation />} />
       <Route path="/invitation/employee/:token" element={<EmployeeInvitation />} />
-
-      {/* Temporary test route without auth */}
-      <Route path="/test" element={<SuperAdminDashboard />} />
 
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

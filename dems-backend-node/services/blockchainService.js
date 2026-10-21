@@ -60,9 +60,20 @@ async function inspectDeployment() {
     const { contractAddress, rpcUrl } = getContractConfig();
     const provider = getProvider();
 
+    console.log('[Backend Blockchain Diagnostics]', {
+        configuredContractAddress: contractAddress,
+        configuredRpcUrl: rpcUrl,
+        environmentContractAddress: process.env.EVIDENCE_CONTRACT_ADDRESS,
+        environmentRpcUrl: process.env.RPC_URL
+    });
+
     let network;
     try {
         network = await provider.getNetwork();
+        console.log('[Backend Blockchain Diagnostics] Connected to network:', {
+            chainId: Number(network.chainId),
+            name: network.name
+        });
     } catch (error) {
         throw serviceError(
             'RPC_UNAVAILABLE',
@@ -73,6 +84,10 @@ async function inspectDeployment() {
     let code;
     try {
         code = await provider.getCode(contractAddress);
+        console.log('[Backend Blockchain Diagnostics] Contract code check:', {
+            hasCode: Boolean(code && code !== '0x'),
+            codeLength: code.length
+        });
     } catch (error) {
         throw serviceError(
             'RPC_UNAVAILABLE',
@@ -157,5 +172,6 @@ module.exports = {
     inspectDeployment,
     assertContractDeployed,
     evidenceExists,
-    getOnChainEvidence
+    getOnChainEvidence,
+    getContractConfig
 };

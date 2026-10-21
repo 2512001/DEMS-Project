@@ -11,7 +11,7 @@ async function seedSuperAdmin() {
         await mongoose.connect(mongoUri);
         console.log('Connected to MongoDB');
 
-        const adminWallet = process.env.SUPER_ADMIN_WALLET || '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266';
+        const adminWallet = process.env.SUPER_ADMIN_WALLET || '0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266';
         const normalizedWallet = adminWallet.toLowerCase();
 
         const existingAdmin = await User.findOne({ walletAddress: normalizedWallet });

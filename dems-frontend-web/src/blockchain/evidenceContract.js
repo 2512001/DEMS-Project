@@ -54,7 +54,7 @@ function explainChainError(error, contract) {
     return 'MetaMask transaction was rejected.';
   }
   if (lower.includes('insufficient funds')) {
-    return 'This MetaMask account does not have enough ETH to pay gas. Import a Hardhat node account (the first account from `npx hardhat node`) or send test ETH.';
+    return 'Insufficient ETH for gas. Check that the selected MetaMask account is funded on the Hardhat Local network (chain 31337). Use the diagnostic info below to verify the connected wallet and balance.';
   }
   if (
     lower.includes('could not decode') ||
@@ -146,16 +146,33 @@ export async function addEvidenceOnChain(payload) {
   const signer = await provider.getSigner();
   const wallet = await signer.getAddress();
 
+  // Diagnostic logging
+  const network = await provider.getNetwork();
+  const balance = await provider.getBalance(wallet);
+  const accounts = await window.ethereum.request({ method: 'eth_accounts' });
+  const chainId = await window.ethereum.request({ method: 'eth_chainId' });
+
+  console.log('[Blockchain Diagnostics]', {
+    configuredContractAddress: EVIDENCE_CONTRACT_ADDRESS,
+    connectedWallet: wallet,
+    expectedUploader,
+    ethAccounts: accounts,
+    providerChainId: Number(network.chainId),
+    metamaskChainId: chainId,
+    ethBalance: ethers.formatEther(balance),
+    balanceRaw: balance.toString(),
+    rpcUrl: provider._getConnection?.url || 'unknown'
+  });
+
   if (expectedUploader && expectedUploader.toLowerCase() !== wallet.toLowerCase()) {
     throw new Error(
       `MetaMask account ${wallet} does not match the uploader ${expectedUploader}. Switch MetaMask to the wallet you used to sign in.`
     );
   }
 
-  const balance = await provider.getBalance(wallet);
   if (balance === 0n) {
     throw new Error(
-      'This MetaMask account has 0 ETH on the local network. Import an account from `npx hardhat node` (it starts with 10000 ETH) or fund this wallet.'
+      `MetaMask account ${wallet} has 0 ETH on chain ${Number(network.chainId)}. Expected non-zero balance on Hardhat Local (31337). Check that this account is funded on the correct network.`
     );
   }
 
@@ -170,7 +187,6 @@ export async function addEvidenceOnChain(payload) {
   const aiScore = scaleAiScore(payload.aiScore);
   const args = [evidenceId, fileHash, ipfsCID, aiScore, wallet];
 
-  const network = await provider.getNetwork();
   const isLocal = Number(network.chainId) === 31337;
   const overrides = {};
 

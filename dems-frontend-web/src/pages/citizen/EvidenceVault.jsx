@@ -1,170 +1,238 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { RefreshCcw, Archive, Shield, TrendingUp, Clock, Database } from 'lucide-react';
+import {
+  ChevronLeft,
+  ChevronRight,
+  FolderLock,
+  RefreshCcw,
+  Search,
+  ShieldCheck,
+  UploadCloud,
+  X
+} from 'lucide-react';
+
 import { getMyFiles } from '../../api/evidence.js';
 import EvidenceTable from '../../components/EvidenceTable.jsx';
+import PageHeader from '../../components/ui/PageHeader.jsx';
+import StatCard from '../../components/ui/StatCard.jsx';
+import { StatCardSkeleton, TableSkeleton } from '../../components/ui/Skeleton.jsx';
+import { formatBytes } from '../../utils/format.js';
 
-function StatCard({ icon: Icon, label, value, color = 'sky' }) {
-  const colorConfig = {
-    sky: {
-      bg: 'from-sky-500/10 to-sky-600/5',
-      border: 'border-sky-500/30',
-      iconBg: 'bg-sky-500/20',
-      iconColor: 'text-sky-400'
-    },
-    emerald: {
-      bg: 'from-emerald-500/10 to-emerald-600/5',
-      border: 'border-emerald-500/30',
-      iconBg: 'bg-emerald-500/20',
-      iconColor: 'text-emerald-400'
-    },
-    violet: {
-      bg: 'from-violet-500/10 to-violet-600/5',
-      border: 'border-violet-500/30',
-      iconBg: 'bg-violet-500/20',
-      iconColor: 'text-violet-400'
-    }
-  };
+const FILTERS = [
+  { value: 'all', label: 'All files' },
+  { value: 'verified', label: 'Blockchain verified' },
+  { value: 'pending', label: 'Pending verification' },
+  { value: 'quarantine', label: 'Quarantine' }
+];
 
-  const config = colorConfig[color];
-
-  return (
-    <div className={`group relative overflow-hidden rounded-xl border ${config.border} bg-gradient-to-br ${config.bg} p-5 backdrop-blur-sm transition-all duration-300 hover:scale-105 hover:shadow-xl hover:shadow-${color}-500/10`}>
-      <div className="flex items-start justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <div className={`flex items-center justify-center rounded-xl ${config.iconBg} p-3 transition-all duration-300 group-hover:scale-110`}>
-            <Icon size={24} className={config.iconColor} />
-          </div>
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">{label}</p>
-            <p className="mt-1 text-2xl font-bold text-white">{value}</p>
-          </div>
-        </div>
-      </div>
-      <div className={`absolute inset-0 bg-gradient-to-r ${color === 'sky' ? 'from-sky-500/0 via-sky-500/5 to-sky-500/0' : color === 'emerald' ? 'from-emerald-500/0 via-emerald-500/5 to-emerald-500/0' : 'from-violet-500/0 via-violet-500/5 to-violet-500/0'} opacity-0 transition-opacity duration-300 group-hover:opacity-100`} />
-    </div>
-  );
+function matchesFilter(file, filter) {
+  if (filter === 'verified') return file.blockchainStatus === 'confirmed' || Boolean(file.blockchainTxHash);
+  if (filter === 'pending') return file.blockchainStatus === 'pending' || file.status === 'pending_blockchain';
+  if (filter === 'quarantine') return Boolean(file.isQuarantine);
+  return true;
 }
 
 export default function EvidenceVault() {
   const [page, setPage] = useState(1);
+  const [term, setTerm] = useState('');
+  const [filter, setFilter] = useState('all');
 
   const query = useQuery({
     queryKey: ['my-files', page],
-    queryFn: () => getMyFiles(page, 5),
-    placeholderData: (prev) => prev
+    queryFn: () => getMyFiles(page, 10),
+    placeholderData: (previous) => previous
   });
 
-  const files = [...(query.data?.quarantine || []), ...(query.data?.data || [])];
-  const pagination = query.data?.pagination || {};
+  const files = useMemo(
+    () => [...(query.data?.quarantine || []), ...(query.data?.data || [])],
+    [query.data]
+  );
 
-  const totalRecords = pagination.totalRecords || 0;
-  const totalPages = pagination.totalPages || 1;
+  const pagination = query.data?.pagination || {};
+  const totalRecords = pagination.totalRecords ?? 0;
+  const totalPages = pagination.totalPages ?? 1;
+
+  const visible = useMemo(() => {
+    const needle = term.trim().toLowerCase();
+    return files.filter((file) => {
+      if (!matchesFilter(file, filter)) return false;
+      if (!needle) return true;
+      return [file.fileName, file.caseId, file.ipfsCID, file.fileHash]
+        .filter(Boolean)
+        .some((value) => String(value).toLowerCase().includes(needle));
+    });
+  }, [files, filter, term]);
+
+  const verified = files.filter((file) => file.blockchainStatus === 'confirmed' || file.blockchainTxHash).length;
+  const storedSize = files.reduce((total, file) => total + (Number(file.fileSize) || 0), 0);
+  const loading = query.isLoading;
 
   return (
-    <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
-      {/* Header Section */}
-      <div className="relative overflow-hidden rounded-2xl border border-slate-700/50 bg-gradient-to-br from-slate-800/50 to-slate-900/50 backdrop-blur-xl">
-        <div className="absolute inset-0 bg-gradient-to-r from-sky-500/5 via-transparent to-sky-500/5 opacity-50" />
-        <div className="relative px-8 py-8">
-          <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
-            <div className="flex items-center gap-6">
-              <div className="flex items-center justify-center rounded-2xl bg-gradient-to-br from-sky-500/30 to-sky-600/20 p-4 shadow-lg shadow-sky-500/30">
-                <Archive size={48} className="text-sky-400" />
-              </div>
-              <div>
-                <h1 className="text-3xl font-bold text-white">
-                  Evidence Vault
-                </h1>
-                <p className="mt-2 text-base text-slate-400">
-                  Secure decentralized storage for your digital evidence
-                </p>
-              </div>
-            </div>
-
+    <div className="space-y-6">
+      <PageHeader
+        eyebrow="Workspace"
+        title="My files"
+        subtitle="Every file you have stored, with its encryption, storage and verification status."
+        actions={
+          <>
             <button
+              type="button"
+              className="btn-secondary"
               onClick={() => query.refetch()}
               disabled={query.isFetching}
-              className="group flex items-center gap-3 rounded-xl border border-slate-600/50 bg-slate-800/50 px-6 py-3 transition-all hover:border-sky-500/50 hover:bg-sky-500/10 hover:shadow-lg hover:shadow-sky-500/20 disabled:opacity-50 disabled:hover:border-slate-600/50 disabled:hover:bg-slate-800/50 disabled:hover:shadow-none"
             >
-              <RefreshCcw
-                className={`transition-transform ${query.isFetching ? 'animate-spin text-sky-400' : 'text-slate-400 group-hover:text-sky-400 group-hover:rotate-180'}`}
-                size={20}
-              />
-              <span className="font-medium text-white">Refresh</span>
+              <RefreshCcw size={14} className={query.isFetching ? 'animate-spin' : ''} />
+              Refresh
+            </button>
+            <Link to="/citizen/upload-evidence" className="btn-primary">
+              <UploadCloud size={15} />
+              Upload File
+            </Link>
+          </>
+        }
+      />
+
+      <div className="grid gap-4 sm:grid-cols-3">
+        {loading ? (
+          Array.from({ length: 3 }).map((_, index) => <StatCardSkeleton key={index} />)
+        ) : (
+          <>
+            <StatCard
+              icon={FolderLock}
+              label="Total files"
+              value={totalRecords}
+              detail={pagination.limit ? `${Math.min(pagination.limit, totalRecords)} shown per page` : undefined}
+              tone="brand"
+            />
+            <StatCard
+              icon={ShieldCheck}
+              label="Blockchain verified"
+              value={verified}
+              detail={files.length ? `Across ${files.length} loaded files` : 'No proofs recorded yet'}
+              tone={verified > 0 ? 'success' : 'neutral'}
+            />
+            <StatCard
+              icon={UploadCloud}
+              label="Loaded size"
+              value={formatBytes(storedSize)}
+              detail="Encrypted before upload to IPFS"
+              tone="neutral"
+            />
+          </>
+        )}
+      </div>
+
+      <section className="panel overflow-hidden">
+        <div className="flex flex-col gap-3 border-b border-line px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between sm:px-5">
+          <div className="relative w-full sm:max-w-xs">
+            <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-faint" />
+            <input
+              value={term}
+              onChange={(event) => setTerm(event.target.value)}
+              placeholder="Search by name, case ID, CID or hash"
+              className="input pl-8 pr-8"
+              aria-label="Search files"
+            />
+            {term ? (
+              <button
+                type="button"
+                onClick={() => setTerm('')}
+                className="absolute right-1.5 top-1/2 grid h-6 w-6 -translate-y-1/2 place-items-center rounded text-ink-faint hover:bg-surface hover:text-ink"
+                aria-label="Clear search"
+              >
+                <X size={12} />
+              </button>
+            ) : null}
+          </div>
+
+          <div className="flex flex-wrap items-center gap-1">
+            {FILTERS.map((item) => (
+              <button
+                key={item.value}
+                type="button"
+                onClick={() => setFilter(item.value)}
+                aria-pressed={filter === item.value}
+                className={`rounded-[7px] px-2.5 py-1.5 text-[12.5px] font-medium transition ${
+                  filter === item.value
+                    ? 'bg-brand-soft text-brand'
+                    : 'text-ink-muted hover:bg-surface hover:text-ink'
+                }`}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {query.isLoading ? (
+          <div className="p-4"><TableSkeleton rows={6} columns={6} /></div>
+        ) : query.isError ? (
+          <div className="p-5">
+            <div className="alert-danger">Your files could not be loaded. Please try again.</div>
+            <button type="button" className="btn-secondary btn-sm mt-3" onClick={() => query.refetch()}>
+              Retry
+            </button>
+          </div>
+        ) : (
+          <EvidenceTable
+            files={visible}
+            emptyTitle={files.length ? 'No files match this view' : 'Your vault is empty'}
+            emptyDescription={
+              files.length
+                ? 'Try a different search term or filter.'
+                : 'Upload your first file to store it securely and record its integrity.'
+            }
+            emptyAction={
+              files.length ? (
+                <button
+                  type="button"
+                  className="btn-secondary btn-sm"
+                  onClick={() => {
+                    setTerm('');
+                    setFilter('all');
+                  }}
+                >
+                  Clear filters
+                </button>
+              ) : (
+                <Link to="/citizen/upload-evidence" className="btn-primary btn-sm">
+                  <UploadCloud size={14} />
+                  Upload File
+                </Link>
+              )
+            }
+          />
+        )}
+
+        <div className="flex flex-col gap-3 border-t border-line px-4 py-3 text-[12.5px] text-ink-muted sm:flex-row sm:items-center sm:justify-between sm:px-5">
+          <p>
+            {totalRecords === 0
+              ? 'No files'
+              : `Page ${pagination.page || page} of ${totalPages} · ${totalRecords} file${totalRecords === 1 ? '' : 's'}`}
+          </p>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              className="btn-secondary btn-sm"
+              onClick={() => setPage((current) => current - 1)}
+              disabled={!pagination.hasPrevPage}
+            >
+              <ChevronLeft size={13} />
+              Previous
+            </button>
+            <button
+              type="button"
+              className="btn-secondary btn-sm"
+              onClick={() => setPage((current) => current + 1)}
+              disabled={!pagination.hasNextPage}
+            >
+              Next
+              <ChevronRight size={13} />
             </button>
           </div>
         </div>
-      </div>
-
-      {/* Stats Overview */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <StatCard
-          icon={Database}
-          label="Total Evidence"
-          value={totalRecords}
-          color="sky"
-        />
-        <StatCard
-          icon={Shield}
-          label="Verified"
-          value={files.filter(f => f.status === 'stored_on_chain').length}
-          color="emerald"
-        />
-        <StatCard
-          icon={Clock}
-          label="Pending"
-          value={files.filter(f => f.status === 'pending_blockchain').length}
-          color="violet"
-        />
-        <StatCard
-          icon={TrendingUp}
-          label="This Page"
-          value={files.length}
-          color="sky"
-        />
-      </div>
-
-      {/* Evidence Table */}
-      <div className="relative overflow-hidden rounded-2xl border border-slate-700/50 bg-gradient-to-br from-slate-800/30 to-slate-900/30 backdrop-blur-xl">
-        <div className="border-b border-slate-700/50 bg-slate-900/30 px-6 py-4">
-          <div className="flex items-center gap-3">
-            <Database size={20} className="text-slate-400" />
-            <h3 className="text-lg font-bold text-white">Evidence Records</h3>
-          </div>
-        </div>
-        <div className="p-6">
-          <EvidenceTable files={files} />
-        </div>
-      </div>
-
-      {/* Pagination */}
-      {totalPages > 1 && (
-        <div className="flex items-center justify-center gap-4 rounded-xl border border-slate-700/50 bg-slate-800/30 px-6 py-4 backdrop-blur-sm">
-          <button
-            onClick={() => setPage((p) => p - 1)}
-            disabled={!pagination.hasPrevPage}
-            className="group flex items-center gap-2 rounded-lg border border-slate-600/50 bg-slate-700/50 px-4 py-2 transition-all hover:border-sky-500/50 hover:bg-sky-500/10 disabled:opacity-50 disabled:hover:border-slate-600/50 disabled:hover:bg-slate-700/50"
-          >
-            <span className="font-medium text-white">Previous</span>
-          </button>
-
-          <div className="flex items-center gap-2">
-            <span className="text-sm text-slate-400">Page</span>
-            <span className="text-lg font-bold text-white">{pagination.page || 1}</span>
-            <span className="text-sm text-slate-400">of</span>
-            <span className="text-lg font-bold text-white">{totalPages}</span>
-          </div>
-
-          <button
-            onClick={() => setPage((p) => p + 1)}
-            disabled={!pagination.hasNextPage}
-            className="group flex items-center gap-2 rounded-lg border border-sky-500/30 bg-sky-500/10 px-4 py-2 transition-all hover:border-sky-500/50 hover:bg-sky-500/20 disabled:opacity-50 disabled:hover:border-slate-600/50 disabled:hover:bg-slate-700/50"
-          >
-            <span className="font-medium text-white">Next</span>
-          </button>
-        </div>
-      )}
+      </section>
     </div>
   );
 }

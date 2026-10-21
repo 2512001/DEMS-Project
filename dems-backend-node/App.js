@@ -49,7 +49,6 @@ app.use(express.urlencoded({ extended: true }));
 app.use('/api/auth', authRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/evidence', evidenceRoutes);
-app.use('/api/Evidence', evidenceRoutes);
 app.use('/api/quarantine', quarantineRoutes);
 app.use('/api/modifications', modificationRoutes);
 app.use('/api/organization', organizationRoutes);

@@ -7,7 +7,9 @@ const {
     getEvidenceById,
     getUploadPolicy,
     getOrganizationEvidence,
-    markBlockchainFailed
+    markBlockchainFailed,
+    retryBlockchainRegistration,
+    checkWalletBalance
 } = require('../controllers/evidenceController');
 const { verifyEvidenceBlockchain } = require('../controllers/evidenceVerificationController');
 const upload = require('../middleware/multer');
@@ -20,6 +22,8 @@ router.post('/upload', protect, upload.single('evidence'), uploadEvidence);
 router.get('/upload-policy', protect, getUploadPolicy);
 router.post('/finalize/:evidenceId', protect, finalizeEvidence);
 router.post('/:evidenceId/blockchain-failed', protect, markBlockchainFailed);
+router.post('/:evidenceId/retry-blockchain', protect, retryBlockchainRegistration);
+router.get('/wallet/:address/balance', checkWalletBalance);
 router.get('/my-files', protect, getMyFiles);
 router.get('/organization', protect, authorizeRoles('admin'), getOrganizationEvidence);
 router.get('/download/:id', protect, getEvidenceById);

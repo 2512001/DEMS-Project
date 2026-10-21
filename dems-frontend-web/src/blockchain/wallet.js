@@ -9,6 +9,26 @@ export const REQUIRED_CHAIN_ID = Number(
 
 export const REQUIRED_CHAIN_HEX = `0x${REQUIRED_CHAIN_ID.toString(16)}`;
 
+const CHAIN_NAMES = {
+  1: 'Ethereum Mainnet',
+  11155111: 'Sepolia Test Network',
+  31337: 'Hardhat Local',
+  1337: 'Local Development'
+};
+
+/** Human-readable label for a chain id, as reported by MetaMask (hex) or config. */
+export function chainLabel(chainId) {
+  if (!chainId) return 'Network unknown';
+  const numeric = typeof chainId === 'string'
+    ? (chainId.startsWith('0x') ? parseInt(chainId, 16) : Number(chainId))
+    : Number(chainId);
+  if (!Number.isFinite(numeric)) return 'Network unknown';
+  return CHAIN_NAMES[numeric] || `Chain ${numeric}`;
+}
+
+export const REQUIRED_NETWORK_LABEL = chainLabel(REQUIRED_CHAIN_ID);
+
+
 const LOCAL_RPC_URLS = ['http://127.0.0.1:8545', 'http://localhost:8545'];
 
 export function hasMetaMask() {
@@ -69,7 +89,16 @@ export async function ensureRequiredNetwork() {
   const requiredHex = REQUIRED_CHAIN_HEX.toLowerCase();
   const current = await currentChainId();
 
+  console.log('[Network Diagnostics]', {
+    requiredChainId: REQUIRED_CHAIN_ID,
+    requiredChainHex: requiredHex,
+    currentChainId: current,
+    chainLabel: chainLabel(current),
+    requiredChainLabel: REQUIRED_NETWORK_LABEL
+  });
+
   if (current === requiredHex) {
+    console.log('[Network Diagnostics] Already on correct network');
     return;
   }
 
@@ -107,6 +136,8 @@ export async function ensureRequiredNetwork() {
   }
 
   const after = await currentChainId();
+  console.log('[Network Diagnostics] After switch:', { after, requiredHex, match: after === requiredHex });
+
   if (after !== requiredHex) {
     throw new Error(
       `MetaMask is still on ${after}. Switch to Hardhat Local (chain ${REQUIRED_CHAIN_ID}) and try again.`
