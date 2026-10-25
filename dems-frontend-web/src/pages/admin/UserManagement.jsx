@@ -1,22 +1,59 @@
 import React, { useMemo, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { Search, Users, X } from 'lucide-react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Search, Users, X, UserMinus, Plus } from 'lucide-react';
 import { getUsers } from '../../api/admin.js';
-import HashValue from '../../components/HashValue.jsx';
+import { getOrganizationGroups, addMemberToGroup, removeMemberFromGroup } from '../../api/groups.js';
 import RoleBadge from '../../components/RoleBadge.jsx';
 import StatusBadge from '../../components/StatusBadge.jsx';
 import PageHeader from '../../components/ui/PageHeader.jsx';
 import EmptyState from '../../components/ui/EmptyState.jsx';
 import { TableSkeleton } from '../../components/ui/Skeleton.jsx';
 import { formatDate, formatRelativeTime } from '../../utils/format.js';
+import Modal from '../../components/ui/Modal.jsx';
+import { useToast } from '../../components/ui/Toast.jsx';
 
 export default function UserManagement() {
+  const queryClient = useQueryClient();
+  const { push } = useToast();
   const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ['admin-users'],
     queryFn: getUsers
   });
   const [term, setTerm] = useState('');
+  const [selectedUser, setSelectedUser] = useState(null);
+  const [showGroupModal, setShowGroupModal] = useState(false);
+  const [removeConfirm, setRemoveConfirm] = useState(null);
+
   const users = data?.data || [];
+
+  const groups = useQuery({
+    queryKey: ['org-groups'],
+    queryFn: getOrganizationGroups,
+    enabled: showGroupModal
+  });
+
+  const addMemberMutation = useMutation({
+    mutationFn: ({ groupId, userId }) => addMemberToGroup(groupId, userId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['org-groups'] });
+      queryClient.invalidateQueries({ queryKey: ['admin-users'] });
+      push('Member added to group.', { tone: 'success' });
+      setShowGroupModal(false);
+      setSelectedUser(null);
+    },
+    onError: (err) => push(err?.response?.data?.message || 'Failed to add member.', { tone: 'error' })
+  });
+
+  const removeMemberMutation = useMutation({
+    mutationFn: ({ groupId, userId }) => removeMemberFromGroup(groupId, userId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['org-groups'] });
+      queryClient.invalidateQueries({ queryKey: ['admin-users'] });
+      push('Member removed from group.', { tone: 'success' });
+      setRemoveConfirm(null);
+    },
+    onError: (err) => push(err?.response?.data?.message || 'Failed to remove member.', { tone: 'error' })
+  });
 
   const visible = useMemo(() => {
     const needle = term.trim().toLowerCase();
@@ -92,6 +129,8 @@ export default function UserManagement() {
                   <th scope="col">Member</th>
                   <th scope="col">Role</th>
                   <th scope="col">Verification</th>
+                  <th scope="col">Membership</th>
+                  <th scope="col">Groups</th>
                   <th scope="col">Last updated</th>
                 </tr>
               </thead>
@@ -108,13 +147,44 @@ export default function UserManagement() {
                             {user.profile?.displayName || 'Unnamed member'}
                           </p>
                           <p className="mt-0.5 truncate text-[11.5px] text-ink-faint">
-                            {user.profile?.email || <HashValue value={user.walletAddress} compact />}
+                            {user.profile?.email || 'Authorized user'}
                           </p>
                         </div>
                       </div>
                     </td>
                     <td><RoleBadge role={user.role} /></td>
                     <td><StatusBadge status={user.officerVerification?.status || 'none'} /></td>
+                    <td>
+                      <StatusBadge status={user.membershipStatus || 'none'} />
+                    </td>
+                    <td>
+                      <div className="flex items-center gap-2">
+                        {user.groups && user.groups.length > 0 ? (
+                          <span className="text-[12px] text-ink-muted">
+                            {user.groups.length} group{user.groups.length === 1 ? '' : 's'}
+                          </span>
+                        ) : (
+                          <span className="text-[12px] text-ink-faint">No groups</span>
+                        )}
+                        {user.membershipStatus === 'active' ? (
+                          <button
+                            type="button"
+                            className="btn-ghost btn-sm p-1"
+                            onClick={() => {
+                              setSelectedUser(user);
+                              setShowGroupModal(true);
+                            }}
+                            title="Manage groups"
+                          >
+                            <Plus size={13} />
+                          </button>
+                        ) : (
+                          <span className="text-[11px] text-ink-faint" title="Only active members can be assigned to groups">
+                            Pending approval
+                          </span>
+                        )}
+                      </div>
+                    </td>
                     <td className="whitespace-nowrap">
                       <span className="text-[12.5px] text-ink-muted" title={formatDate(user.updatedAt)}>
                         {formatRelativeTime(user.updatedAt)}
@@ -127,6 +197,110 @@ export default function UserManagement() {
           </div>
         )}
       </section>
+
+      {/* Group Assignment Modal */}
+      <Modal
+        open={showGroupModal}
+        onClose={() => {
+          setShowGroupModal(false);
+          setSelectedUser(null);
+        }}
+        title={`Manage groups for ${selectedUser?.profile?.displayName || 'this employee'}`}
+        description={selectedUser?.membershipStatus === 'active' ? 'Add or remove group memberships' : 'Employee must be approved before group assignment'}
+        size="sm"
+        footer={
+          <>
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={() => {
+                setShowGroupModal(false);
+                setSelectedUser(null);
+              }}
+            >
+              Close
+            </button>
+          </>
+        }
+      >
+        {groups.isLoading ? (
+          <div className="py-4 text-center text-ink-muted">Loading groups...</div>
+        ) : !selectedUser ? (
+          <div className="py-4 text-center text-ink-muted">No user selected</div>
+        ) : selectedUser.membershipStatus !== 'active' ? (
+          <div className="py-4 text-center text-ink-muted">
+            This employee's membership is {selectedUser.membershipStatus}. Approve their membership first before assigning to groups.
+          </div>
+        ) : (
+          <div className="max-h-64 overflow-y-auto space-y-2">
+            {groups.data?.data?.map((group) => {
+              const isMember = group.members?.some(m => m._id === selectedUser._id);
+              return (
+                <div
+                  key={group._id}
+                  className="flex items-center justify-between rounded-[8px] border border-line px-3 py-2"
+                >
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[13px] font-medium text-ink">{group.name}</p>
+                    <p className="text-[11.5px] text-ink-muted">{group.members?.length || 0} members</p>
+                  </div>
+                  {isMember ? (
+                    <button
+                      type="button"
+                      className="btn-ghost btn-sm text-danger p-1"
+                      onClick={() => setRemoveConfirm({ groupId: group._id, userId: selectedUser._id, groupName: group.name })}
+                      title="Remove from group"
+                    >
+                      <UserMinus size={14} />
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      className="btn-ghost btn-sm text-brand p-1"
+                      onClick={() => addMemberMutation.mutate({ groupId: group._id, userId: selectedUser._id })}
+                      disabled={addMemberMutation.isPending}
+                      title="Add to group"
+                    >
+                      <Plus size={14} />
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+            {groups.data?.data?.length === 0 && (
+              <div className="py-4 text-center text-ink-muted">No groups available. Create groups first.</div>
+            )}
+          </div>
+        )}
+      </Modal>
+
+      {/* Remove from Group Confirmation */}
+      <Modal
+        open={Boolean(removeConfirm)}
+        onClose={() => setRemoveConfirm(null)}
+        title="Remove from group?"
+        description={`Remove this employee from "${removeConfirm?.groupName}"?`}
+        size="sm"
+        footer={
+          <>
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={() => setRemoveConfirm(null)}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="btn-danger"
+              onClick={() => removeMemberMutation.mutate(removeConfirm)}
+              disabled={removeMemberMutation.isPending}
+            >
+              {removeMemberMutation.isPending ? 'Removing…' : 'Remove'}
+            </button>
+          </>
+        }
+      />
     </div>
   );
 }

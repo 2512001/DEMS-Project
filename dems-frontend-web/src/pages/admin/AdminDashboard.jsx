@@ -9,7 +9,8 @@ import {
   ShieldAlert,
   ShieldCheck,
   UserPlus,
-  Users
+  Users,
+  FolderTree
 } from 'lucide-react';
 
 import { getOrganizationOverview, getOrganization } from '../../api/admin.js';
@@ -191,6 +192,12 @@ export default function AdminDashboard() {
                 icon: Users,
                 title: 'Employees',
                 detail: 'Roles and verification status'
+              },
+              {
+                to: '/admin/groups',
+                icon: FolderTree,
+                title: 'Groups',
+                detail: 'Team and access management'
               },
               {
                 to: '/admin/organization',

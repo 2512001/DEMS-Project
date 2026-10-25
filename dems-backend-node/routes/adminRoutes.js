@@ -7,7 +7,8 @@ const {
     reviewVerificationRequest,
     reviewMembershipApplication,
     getAuditLogs,
-    upgradeOfficer
+    upgradeOfficer,
+    getPlatformUsers
 } = require('../controllers/adminController');
 const { protect } = require('../middleware/authMiddleware');
 const { authorizeRoles } = require('../middleware/roleMiddleware');
@@ -43,6 +44,7 @@ router.get('/verification-requests', protect, authorizeRoles('admin'), getVerifi
 router.post('/verification-requests/review', protect, authorizeRoles('admin'), reviewVerificationRequest);
 router.post('/membership-applications/review', protect, authorizeRoles('admin'), reviewMembershipApplication);
 router.get('/users', protect, authorizeRoles('admin'), getUsers);
+router.get('/platform-users', protect, authorizeRoles('super_admin'), getPlatformUsers);
 router.get('/audit-logs', protect, authorizeRoles('admin'), getAuditLogs);
 router.post('/upgrade-officer', protect, authorizeRoles('admin'), upgradeOfficer);
 

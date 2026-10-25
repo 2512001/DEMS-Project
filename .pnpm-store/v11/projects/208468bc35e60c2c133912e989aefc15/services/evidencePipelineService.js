@@ -111,6 +111,7 @@ async function createTrustedEvidence({
     caseId,
     aiAnalysis,
     requestBlockchain,
+    groupId = null,
     reviewStatus = 'not_required',
     quarantineId = null,
     approvedBy = null
@@ -123,6 +124,7 @@ async function createTrustedEvidence({
         user: user.id,
         uploadedBy: user.id,
         organizationId: user.organizationId || null,
+        groupId,
         UploaderWallet: String(user.walletAddress).toLowerCase(),
         caseId,
         fileName: sanitizeFileName(file.originalname),
@@ -262,6 +264,20 @@ async function processEvidenceUpload({ user, file, fileBuffer, body }) {
         };
     }
 
+    // Validate groupId if provided
+    let groupId = null;
+    if (body.groupId) {
+        const Group = require('../model/groupModel');
+        const group = await Group.findById(body.groupId);
+        if (!group) {
+            throw httpError(404, 'Group not found.');
+        }
+        if (String(group.organizationId) !== String(user.organizationId)) {
+            throw httpError(403, 'You can only assign evidence to groups within your organization.');
+        }
+        groupId = body.groupId;
+    }
+
     const evidence = await createTrustedEvidence({
         user,
         fileBuffer,
@@ -270,6 +286,7 @@ async function processEvidenceUpload({ user, file, fileBuffer, body }) {
         caseId,
         aiAnalysis,
         requestBlockchain,
+        groupId,
         reviewStatus: 'not_required'
     });
 

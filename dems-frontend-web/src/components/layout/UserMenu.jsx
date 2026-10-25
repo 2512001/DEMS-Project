@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { ChevronDown, LogOut, Settings, User } from 'lucide-react';
 import { useAuth } from '../../auth/AuthContext.jsx';
 import RoleBadge, { roleLabel } from '../RoleBadge.jsx';
-import { initials, shortAddress } from '../../utils/format.js';
+import { initials } from '../../utils/format.js';
 
 export default function UserMenu() {
   const { user, role, walletAddress, logout } = useAuth();
@@ -55,7 +55,7 @@ export default function UserMenu() {
               {displayName || 'Unnamed account'}
             </p>
             <p className="mt-0.5 truncate text-[12px] text-ink-muted">
-              {user?.profile?.email || shortAddress(address)}
+              {user?.profile?.email || 'Authorized account'}
             </p>
             <div className="mt-2">
               <RoleBadge role={user?.role || role} />

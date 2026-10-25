@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useLocation } from 'react-router-dom';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import Zoom from 'react-medium-image-zoom';
 import 'react-medium-image-zoom/dist/styles.css';
@@ -21,7 +21,6 @@ import {
   User as UserIcon
 } from 'lucide-react';
 
-import HashValue from '../../components/HashValue.jsx';
 import StatusBadge from '../../components/StatusBadge.jsx';
 import VerificationButton from '../../components/verification/VerificationButton.jsx';
 import VerificationResultCard from '../../components/verification/VerificationResultCard.jsx';
@@ -30,6 +29,7 @@ import FileTypeIcon from '../../components/ui/FileTypeIcon.jsx';
 import EmptyState from '../../components/ui/EmptyState.jsx';
 import { formatBytes, formatDate, formatRelativeTime } from '../../utils/format.js';
 import { downloadEvidence, verifyEvidenceBlockchain } from '../../api/evidence.js';
+import { useAuth } from '../../auth/AuthContext.jsx';
 
 const VERIFICATION_LOADING_MESSAGES = [
   'Verifying file integrity…',
@@ -102,8 +102,31 @@ function AiSummary({ analysis }) {
 
 export default function EvidenceDetails() {
   const { evidenceId } = useParams();
+  const location = useLocation();
+  const { user } = useAuth();
   const [loadingMessageIndex, setLoadingMessageIndex] = useState(0);
   const [verificationError, setVerificationError] = useState('');
+
+  // Determine back link based on user role and referrer
+  const getBackLink = () => {
+    if (user?.role === 'super_admin') {
+      return '/superadmin/evidence';
+    }
+    if (user?.role === 'admin') {
+      return '/admin/evidence';
+    }
+    return '/citizen/evidence-vault';
+  };
+
+  const getBackLabel = () => {
+    if (user?.role === 'super_admin') {
+      return 'Global evidence';
+    }
+    if (user?.role === 'admin') {
+      return 'Organization evidence';
+    }
+    return 'My files';
+  };
 
   const { data, isLoading, error } = useQuery({
     queryKey: ['evidence', evidenceId],
@@ -167,7 +190,7 @@ export default function EvidenceDetails() {
         title="File could not be loaded"
         description="The file may have been removed, or you may not have access to it."
         action={
-          <Link to="/citizen/evidence-vault" className="btn-secondary btn-sm">
+          <Link to={getBackLink()} className="btn-secondary btn-sm">
             <ArrowLeft size={14} />
             Back to files
           </Link>
@@ -183,7 +206,7 @@ export default function EvidenceDetails() {
         title="File not found"
         description="This record does not exist or is no longer available."
         action={
-          <Link to="/citizen/evidence-vault" className="btn-secondary btn-sm">
+          <Link to={getBackLink()} className="btn-secondary btn-sm">
             <ArrowLeft size={14} />
             Back to files
           </Link>
@@ -203,11 +226,11 @@ export default function EvidenceDetails() {
     <div className="space-y-6">
       <div>
         <Link
-          to="/citizen/evidence-vault"
+          to={getBackLink()}
           className="mb-3 inline-flex items-center gap-1.5 text-[12.5px] text-ink-muted transition hover:text-ink"
         >
           <ArrowLeft size={13} />
-          My files
+          {getBackLabel()}
         </Link>
         <PageHeader
           title={evidence.fileName}
@@ -279,7 +302,7 @@ export default function EvidenceDetails() {
               <Field label="Owner">
                 <span className="inline-flex items-center gap-1.5">
                   <UserIcon size={13} className="text-ink-faint" />
-                  <HashValue value={evidence.UploaderWallet} compact />
+                  <span className="text-[13px] text-ink">Authorized uploader</span>
                 </span>
               </Field>
               <Field label="Organization">
@@ -359,35 +382,35 @@ export default function EvidenceDetails() {
 
           <section className="section-card">
             <h2 className="section-title">Technical details</h2>
-            <p className="section-subtitle">Identifiers used for verification</p>
+            <p className="section-subtitle">Verification status and identifiers</p>
             <div className="mt-3 space-y-2">
               <TechnicalSection
-                title="File hash"
-                description="SHA-256 of the original file"
+                title="File integrity"
+                description="Cryptographic hash verification status"
                 defaultOpen
               >
                 <div className="flex items-center gap-2">
                   <Fingerprint size={13} className="shrink-0 text-ink-faint" />
-                  <HashValue value={evidence.fileHash} compact={false} />
+                  <span className="text-[13px] text-ink">Available</span>
                 </div>
               </TechnicalSection>
 
-              <TechnicalSection title="IPFS content identifier" description="CID of the encrypted blob">
+              <TechnicalSection title="IPFS storage" description="Decentralized content addressable storage">
                 {evidence.ipfsCID ? (
                   <div className="flex items-center gap-2">
                     <Link2 size={13} className="shrink-0 text-ink-faint" />
-                    <HashValue value={evidence.ipfsCID} compact={false} />
+                    <span className="text-[13px] text-ink">Stored on IPFS</span>
                   </div>
                 ) : (
                   <p className="text-[12.5px] text-ink-muted">Not stored on IPFS.</p>
                 )}
               </TechnicalSection>
 
-              <TechnicalSection title="Blockchain transaction" description="Proof of integrity on the connected network">
+              <TechnicalSection title="Blockchain transaction" description="On-chain integrity proof">
                 {evidence.blockchainTxHash ? (
                   <div className="flex items-center gap-2">
                     <Shield size={13} className="shrink-0 text-ink-faint" />
-                    <HashValue value={evidence.blockchainTxHash} compact={false} />
+                    <span className="text-[13px] text-ink">Recorded on blockchain</span>
                   </div>
                 ) : (
                   <p className="text-[12.5px] text-ink-muted">No transaction recorded.</p>
@@ -396,7 +419,7 @@ export default function EvidenceDetails() {
 
               <TechnicalSection title="Record metadata" description="Storage, review and audit fields">
                 <dl className="grid gap-3 sm:grid-cols-2">
-                  <Field label="Record ID"><HashValue value={evidence._id} compact /></Field>
+                  <Field label="Record ID">Available</Field>
                   <Field label="Storage status">{storageStatus}</Field>
                   <Field label="Blockchain status">{chainStatus}</Field>
                   <Field label="Review status">{evidence.reviewStatus || 'not_required'}</Field>

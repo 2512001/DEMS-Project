@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Link } from 'react-router-dom';
 import {
   AlertTriangle,
   BarChart3,
@@ -15,7 +16,10 @@ import {
   ShieldCheck,
   UserPlus,
   Users,
-  X
+  X,
+  FileText,
+  HardDrive,
+  Link as LinkIcon
 } from 'lucide-react';
 
 import {
@@ -23,7 +27,8 @@ import {
   createOrganization,
   assignOrganizationAdmin,
   getOrganizationDetails,
-  getOrganizationAdmins
+  getOrganizationAdmins,
+  updateOrganizationStatus
 } from '../../api/admin.js';
 import { getPlatformAnalytics } from '../../api/analytics.js';
 import { useAuth } from '../../auth/AuthContext.jsx';
@@ -409,6 +414,13 @@ export default function SuperAdminDashboard() {
     }
   });
 
+  const updateOrgStatus = useMutation({
+    mutationFn: ({ organizationId, status }) => updateOrganizationStatus(organizationId, status),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['organizations'] });
+    }
+  });
+
   if (user?.role !== 'super_admin') {
     return (
       <div className="section-card">
@@ -425,6 +437,10 @@ export default function SuperAdminDashboard() {
   const tabs = [
     { value: 'overview', label: 'Overview', icon: BarChart3 },
     { value: 'organizations', label: 'Organizations', icon: Building2, count: orgs.length },
+    { value: 'users', label: 'Users', icon: Users },
+    { value: 'evidence', label: 'Evidence', icon: FileText },
+    { value: 'blockchain', label: 'Blockchain', icon: LinkIcon },
+    { value: 'storage', label: 'Storage', icon: HardDrive },
     { value: 'administrators', label: 'Administrators', icon: Users },
     { value: 'security', label: 'Security', icon: Shield }
   ];
@@ -567,7 +583,7 @@ export default function SuperAdminDashboard() {
             </button>
           </div>
           {organizations.isLoading ? (
-            <div className="p-4"><TableSkeleton rows={4} columns={4} /></div>
+            <div className="p-4"><TableSkeleton rows={4} columns={5} /></div>
           ) : orgs.length === 0 ? (
             <div className="p-5">
               <EmptyState
@@ -592,6 +608,7 @@ export default function SuperAdminDashboard() {
                     <th>Status</th>
                     <th>Admins</th>
                     <th>Employees</th>
+                    <th>Status actions</th>
                     <th className="text-right">Actions</th>
                   </tr>
                 </thead>
@@ -611,6 +628,18 @@ export default function SuperAdminDashboard() {
                       <td><StatusBadge status={org.status} /></td>
                       <td className="text-[13px] text-ink-muted">{org.stats?.adminCount ?? 0}</td>
                       <td className="text-[13px] text-ink-muted">{org.stats?.employeeCount ?? 0}</td>
+                      <td>
+                        <select
+                          value={org.status}
+                          onChange={(e) => updateOrgStatus.mutate({ organizationId: org._id, status: e.target.value })}
+                          className="input text-[12px] py-1"
+                          disabled={updateOrgStatus.isPending}
+                        >
+                          <option value="active">Active</option>
+                          <option value="suspended">Suspended</option>
+                          <option value="pending">Pending</option>
+                        </select>
+                      </td>
                       <td className="text-right">
                         <button type="button" className="btn-ghost btn-sm" onClick={() => setSelectedOrg(org._id)}>
                           View
@@ -625,42 +654,272 @@ export default function SuperAdminDashboard() {
         </section>
       ) : null}
 
+      {activeTab === 'evidence' ? (
+        <section className="panel overflow-hidden">
+          <div className="card-header">
+            <div>
+              <h2 className="section-title">Global evidence</h2>
+              <p className="section-subtitle">View all evidence files across the platform</p>
+            </div>
+            <Link to="/superadmin/evidence" className="btn-primary btn-sm">
+              View all evidence
+            </Link>
+          </div>
+          <div className="p-5">
+            <EmptyState
+              icon={FileText}
+              title="Manage evidence"
+              description="View detailed evidence listings with organization, uploader, and blockchain filters."
+              action={
+                <Link to="/superadmin/evidence" className="btn-primary btn-sm">
+                  Open evidence management
+                </Link>
+              }
+            />
+          </div>
+        </section>
+      ) : null}
+
+      {activeTab === 'blockchain' ? (
+        <section className="panel overflow-hidden">
+          <div className="card-header">
+            <div>
+              <h2 className="section-title">Blockchain monitoring</h2>
+              <p className="section-subtitle">View blockchain transaction status and verification</p>
+            </div>
+            <Link to="/superadmin/blockchain" className="btn-primary btn-sm">
+              View blockchain status
+            </Link>
+          </div>
+          <div className="p-5">
+            <EmptyState
+              icon={LinkIcon}
+              title="Blockchain operations"
+              description="Monitor transaction confirmations, pending operations, and failures."
+              action={
+                <Link to="/superadmin/blockchain" className="btn-primary btn-sm">
+                  Open blockchain monitoring
+                </Link>
+              }
+            />
+          </div>
+        </section>
+      ) : null}
+
+      {activeTab === 'storage' ? (
+        <section className="panel overflow-hidden">
+          <div className="card-header">
+            <div>
+              <h2 className="section-title">Storage monitoring</h2>
+              <p className="section-subtitle">View evidence storage statistics and IPFS status</p>
+            </div>
+            <Link to="/superadmin/storage" className="btn-primary btn-sm">
+              View storage status
+            </Link>
+          </div>
+          <div className="p-5">
+            <EmptyState
+              icon={HardDrive}
+              title="Storage statistics"
+              description="View evidence distribution by organization and file type."
+              action={
+                <Link to="/superadmin/storage" className="btn-primary btn-sm">
+                  Open storage monitoring
+                </Link>
+              }
+            />
+          </div>
+        </section>
+      ) : null}
+
+      {activeTab === 'users' ? (
+        <section className="panel overflow-hidden">
+          <div className="card-header">
+            <div>
+              <h2 className="section-title">Platform users</h2>
+              <p className="section-subtitle">View all users across organizations</p>
+            </div>
+            <Link to="/superadmin/users" className="btn-primary btn-sm">
+              View all users
+            </Link>
+          </div>
+          <div className="p-5">
+            <EmptyState
+              icon={Users}
+              title="Manage users"
+              description="View detailed user listings with role, organization, and membership filters."
+              action={
+                <Link to="/superadmin/users" className="btn-primary btn-sm">
+                  Open user management
+                </Link>
+              }
+            />
+          </div>
+        </section>
+      ) : null}
+
+      {activeTab === 'evidence' ? (
+        <section className="panel overflow-hidden">
+          <div className="card-header">
+            <div>
+              <h2 className="section-title">Global evidence</h2>
+              <p className="section-subtitle">View all evidence files across the platform</p>
+            </div>
+            <Link to="/superadmin/evidence" className="btn-primary btn-sm">
+              View all evidence
+            </Link>
+          </div>
+          <div className="p-5">
+            <EmptyState
+              icon={FileText}
+              title="Manage evidence"
+              description="View detailed evidence listings with organization, uploader, and blockchain filters."
+              action={
+                <Link to="/superadmin/evidence" className="btn-primary btn-sm">
+                  Open evidence management
+                </Link>
+              }
+            />
+          </div>
+        </section>
+      ) : null}
+
+      {activeTab === 'blockchain' ? (
+        <section className="panel overflow-hidden">
+          <div className="card-header">
+            <div>
+              <h2 className="section-title">Blockchain monitoring</h2>
+              <p className="section-subtitle">View blockchain transaction status and verification</p>
+            </div>
+            <Link to="/superadmin/blockchain" className="btn-primary btn-sm">
+              View blockchain status
+            </Link>
+          </div>
+          <div className="p-5">
+            <EmptyState
+              icon={LinkIcon}
+              title="Blockchain operations"
+              description="Monitor transaction confirmations, pending operations, and failures."
+              action={
+                <Link to="/superadmin/blockchain" className="btn-primary btn-sm">
+                  Open blockchain monitoring
+                </Link>
+              }
+            />
+          </div>
+        </section>
+      ) : null}
+
+      {activeTab === 'storage' ? (
+        <section className="panel overflow-hidden">
+          <div className="card-header">
+            <div>
+              <h2 className="section-title">Storage monitoring</h2>
+              <p className="section-subtitle">View evidence storage statistics and IPFS status</p>
+            </div>
+            <Link to="/superadmin/storage" className="btn-primary btn-sm">
+              View storage status
+            </Link>
+          </div>
+          <div className="p-5">
+            <EmptyState
+              icon={HardDrive}
+              title="Storage statistics"
+              description="View evidence distribution by organization and file type."
+              action={
+                <Link to="/superadmin/storage" className="btn-primary btn-sm">
+                  Open storage monitoring
+                </Link>
+              }
+            />
+          </div>
+        </section>
+      ) : null}
+
       {activeTab === 'administrators' ? (
-        <section className="section-card">
-          <h2 className="section-title">Administrators</h2>
-          <p className="section-subtitle">Administrators are assigned per organization. Open an organization from the Organizations tab to see who is assigned.</p>
-          <div className="mt-4 flex flex-wrap gap-2">
-            <button type="button" className="btn-primary btn-sm" onClick={() => setShowInviteForm(true)}>
-              <UserPlus size={14} />
-              Invite administrator
+        <section className="panel overflow-hidden">
+          <div className="card-header">
+            <div>
+              <h2 className="section-title">Organization administrators</h2>
+              <p className="section-subtitle">Assign and manage organization administrators</p>
+            </div>
+            <button type="button" className="btn-secondary btn-sm" onClick={() => setShowInviteForm(true)}>
+              <Mail size={13} />
+              Invite admin
             </button>
-            <button type="button" className="btn-secondary btn-sm" onClick={() => setActiveTab('organizations')}>
-              Browse organizations
-            </button>
+          </div>
+          <div className="p-5">
+            <EmptyState
+              icon={UserPlus}
+              title="Admin invitations"
+              description="Send invitations to users to become organization administrators."
+              action={
+                <button type="button" className="btn-primary btn-sm" onClick={() => setShowInviteForm(true)}>
+                  <Mail size={14} />
+                  Send invitation
+                </button>
+              }
+            />
+          </div>
+        </section>
+      ) : null}
+
+      {activeTab === 'retention' ? (
+        <section className="panel overflow-hidden">
+          <div className="card-header">
+            <div>
+              <h2 className="section-title">Retention management</h2>
+              <p className="section-subtitle">Manage evidence retention policies and scheduled deletions</p>
+            </div>
+            <Link to="/superadmin/retention" className="btn-primary btn-sm">
+              Manage retention
+            </Link>
+          </div>
+          <div className="p-5">
+            <EmptyState
+              icon={Trash2}
+              title="Retention policies"
+              description="Configure evidence expiration dates, view scheduled deletions, and run dry-run previews."
+              action={
+                <Link to="/superadmin/retention" className="btn-primary btn-sm">
+                  Open retention management
+                </Link>
+              }
+            />
           </div>
         </section>
       ) : null}
 
       {activeTab === 'security' ? (
-        <section className="section-card">
-          <h2 className="section-title">Security oversight</h2>
-          <p className="section-subtitle">Platform-wide verification and access signals</p>
-          <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {[
-              ['Integrity verified', overview?.integrityVerified ?? 0, <Check size={15} />, 'text-success'],
-              ['Integrity failures', overview?.integrityFailures ?? 0, <AlertTriangle size={15} />, 'text-danger'],
-              ['Quarantined', overview?.quarantinedEvidence ?? 0, <Shield size={15} />, 'text-warn'],
-              ['Blockchain confirmed', overview?.blockchainVerifiedEvidence ?? 0, <ShieldCheck size={15} />, 'text-success'],
-              ['Pending invitations', overview?.pendingInvitations ?? 0, <Clock size={15} />, 'text-ink-muted'],
-              ['Expired invitations', overview?.expiredInvitations ?? 0, <X size={15} />, 'text-ink-muted']
-            ].map(([label, value, icon, color]) => (
-              <div key={label} className="rounded-[10px] border border-line bg-[#FBFCFD] p-3.5">
-                <span className={color}>{icon}</span>
-                <p className="mt-2 text-[19px] font-semibold text-ink">{value}</p>
-                <p className="text-[12px] text-ink-muted">{label}</p>
-              </div>
-            ))}
+        <section className="panel overflow-hidden">
+          <div className="card-header">
+            <div>
+              <h2 className="section-title">Security events</h2>
+              <p className="section-subtitle">Recent security-relevant events across the platform</p>
+            </div>
           </div>
+          {platformAnalytics.isLoading ? (
+            <div className="space-y-3 p-5">
+              {Array.from({ length: 4 }).map((_, index) => <span key={index} className="skeleton h-3 w-full" />)}
+            </div>
+          ) : securityEvents.length === 0 ? (
+            <div className="p-5">
+              <EmptyState compact icon={ShieldCheck} title="No security events" description="Nothing concerning has been recorded recently." />
+            </div>
+          ) : (
+            <ul className="divide-y divide-line">
+              {securityEvents.map((event, index) => (
+                <li key={index} className="flex items-start gap-3 px-5 py-3.5">
+                  <span className={`h-1.5 w-1.5 shrink-0 mt-2 rounded-full ${event.result && event.result !== 'success' ? 'bg-danger' : 'bg-success'}`} />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[13px] font-medium text-ink">{event.action}</p>
+                    <p className="mt-0.5 text-[12px] text-ink-muted">{event.reason || 'No details provided'}</p>
+                  </div>
+                  <span className="shrink-0 text-[11.5px] text-ink-faint">{formatRelativeTime(event.createdAt)}</span>
+                </li>
+              ))}
+            </ul>
+          )}
         </section>
       ) : null}
 

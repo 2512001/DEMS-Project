@@ -11,6 +11,10 @@ const organizationRoutes = require('./routes/organizationRoutes');
 const invitationRoutes = require('./routes/invitationRoutes');
 const analyticsRoutes = require('./routes/analyticsRoutes');
 const otpRoutes = require('./routes/otpRoutes');
+const groupRoutes = require('./routes/groupRoutes');
+const notificationRoutes = require('./routes/notificationRoutes');
+const monitoringRoutes = require('./routes/monitoringRoutes');
+const controlledUploadRoutes = require('./routes/controlledUploadRoutes');
 const { initializeTransporter, verifySMTPConnection, isSMTPConfigured } = require('./services/emailService');
 const mongoose = require("mongoose");
 
@@ -55,6 +59,10 @@ app.use('/api/organization', organizationRoutes);
 app.use('/api/invitations', invitationRoutes);
 app.use('/api/analytics', analyticsRoutes);
 app.use('/api/otp', otpRoutes);
+app.use('/api/groups', groupRoutes);
+app.use('/api/notifications', notificationRoutes);
+app.use('/api/monitoring', monitoringRoutes);
+app.use('/api/controlled-upload', controlledUploadRoutes);
 
 
 

@@ -1,13 +1,3 @@
-export function shortAddress(value = '') {
-  if (!value) return 'Not connected';
-  return `${value.slice(0, 6)}…${value.slice(-4)}`;
-}
-
-export function compactHash(value = '', start = 10, end = 6) {
-  if (!value) return '—';
-  return value.length > start + end ? `${value.slice(0, start)}…${value.slice(-end)}` : value;
-}
-
 export function formatDate(value) {
   if (!value) return '—';
   const date = new Date(value);

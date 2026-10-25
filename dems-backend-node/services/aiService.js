@@ -20,7 +20,8 @@ function mockAnalyze(fileBuffer, options = {}) {
             analyzedAt: new Date().toISOString(),
             score: 31.2,
             isDeepfake: true,
-            metadataMatch: true
+            metadataMatch: true,
+            isDemo: true
         };
     }
 
@@ -38,7 +39,8 @@ function mockAnalyze(fileBuffer, options = {}) {
         analyzedAt: new Date().toISOString(),
         score: 96.4,
         isDeepfake: false,
-        metadataMatch: true
+        metadataMatch: true,
+        isDemo: true
     };
 }
 

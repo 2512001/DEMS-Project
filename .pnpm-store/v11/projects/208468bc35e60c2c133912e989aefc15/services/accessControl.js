@@ -40,15 +40,28 @@ function isEvidenceOwner(user, evidence) {
     return ownerId === user.id || uploader === String(user.walletAddress || '').toLowerCase();
 }
 
-function canAccessEvidence(user, evidence) {
+async function canAccessEvidence(user, evidence) {
     if (!user || !evidence) return false;
+    
+    // Super admin can access all evidence
+    if (isSuperAdmin(user)) return true;
+    
     if (isEvidenceOwner(user, evidence)) return true;
     if (isAdmin(user) && sameOrganization(user, evidence.organizationId)) return true;
+    
+    if (sameOrganization(user, evidence.organizationId) && evidence.groupId) {
+        const Group = require('../model/groupModel');
+        const group = await Group.findById(evidence.groupId);
+        if (group && group.members.includes(user.id)) {
+            return true;
+        }
+    }
+    
     return false;
 }
 
-function canVerifyEvidence(user, evidence) {
-    return canAccessEvidence(user, evidence);
+async function canVerifyEvidence(user, evidence) {
+    return await canAccessEvidence(user, evidence);
 }
 
 function requireOrgAdmin(user) {

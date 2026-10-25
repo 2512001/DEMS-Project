@@ -50,7 +50,7 @@ export default function GlobalSearch({ open, onClose, detailsBase = '/citizen/ev
     if (!needle) return files.slice(0, 6);
     return files
       .filter((file) =>
-        [file.fileName, file.caseId, file.ipfsCID, file.fileHash]
+        [file.fileName, file.caseId]
           .filter(Boolean)
           .some((value) => String(value).toLowerCase().includes(needle))
       )
@@ -89,7 +89,7 @@ export default function GlobalSearch({ open, onClose, detailsBase = '/citizen/ev
             ref={inputRef}
             value={term}
             onChange={(event) => setTerm(event.target.value)}
-            placeholder="Search files by name, case ID, CID or hash…"
+            placeholder="Search files by name or case ID…"
             className="w-full bg-transparent text-[14px] text-ink outline-none placeholder:text-ink-faint"
             aria-label="Search files"
           />
@@ -125,7 +125,7 @@ export default function GlobalSearch({ open, onClose, detailsBase = '/citizen/ev
               </p>
               <p className="mt-1 text-[12.5px] text-ink-muted">
                 {files.length
-                  ? 'Try a different name, case ID, CID or hash.'
+                  ? 'Try a different name or case ID.'
                   : 'Upload a file and it will appear here.'}
               </p>
             </div>

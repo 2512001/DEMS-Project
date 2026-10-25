@@ -2,7 +2,6 @@ import React from 'react';
 import { CheckCircle2, XCircle } from 'lucide-react';
 import VerificationStatusBadge, { VerificationBanner } from './VerificationStatusBadge.jsx';
 import VerificationComparisonTable from './VerificationComparisonTable.jsx';
-import HashValue from '../HashValue.jsx';
 import { formatDate } from '../../utils/format.js';
 
 function CheckCard({ label, matched }) {
@@ -115,15 +114,15 @@ export default function VerificationResultCard({ result }) {
               </div>
               <div>
                 <dt className="detail-label">Wallet address</dt>
-                <dd className="mt-1"><HashValue value={blockchainData.uploadedBy} compact /></dd>
+                <dd className="mt-1"><span className="text-[13px] text-ink">Authorized uploader</span></dd>
               </div>
               <div>
                 <dt className="detail-label">Transaction hash</dt>
-                <dd className="mt-1"><HashValue value={blockchainData.transactionHash} compact /></dd>
+                <dd className="mt-1"><span className="text-[13px] text-ink">Recorded on blockchain</span></dd>
               </div>
               <div>
                 <dt className="detail-label">IPFS CID</dt>
-                <dd className="mt-1"><HashValue value={blockchainData.ipfsCID} compact /></dd>
+                <dd className="mt-1"><span className="text-[13px] text-ink">Stored on IPFS</span></dd>
               </div>
             </dl>
           </Section>

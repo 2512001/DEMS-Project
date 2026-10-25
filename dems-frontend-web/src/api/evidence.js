@@ -15,8 +15,20 @@ export async function getUploadPolicy() {
   return data.data;
 }
 
-export async function getOrganizationEvidence() {
-  const { data } = await apiClient.get('/evidence/organization');
+export async function getOrganizationEvidence(params = {}) {
+  const { page = 1, limit = 20, search = '', status = '', blockchainStatus = '', storageStatus = '', uploaderWallet = '', sortBy = 'createdAt', sortOrder = 'desc' } = params;
+  const queryParams = new URLSearchParams({
+    page: String(page),
+    limit: String(limit),
+    ...(search && { search }),
+    ...(status && { status }),
+    ...(blockchainStatus && { blockchainStatus }),
+    ...(storageStatus && { storageStatus }),
+    ...(uploaderWallet && { uploaderWallet }),
+    sortBy,
+    sortOrder
+  });
+  const { data } = await apiClient.get(`/evidence/organization?${queryParams}`);
   return data;
 }
 

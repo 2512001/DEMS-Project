@@ -3,7 +3,6 @@ import { Link } from 'react-router-dom';
 import { AlertTriangle, Wallet } from 'lucide-react';
 import { useAuth } from '../../auth/AuthContext.jsx';
 import { REQUIRED_NETWORK_LABEL, chainLabel } from '../../blockchain/wallet.js';
-import { shortAddress } from '../../utils/format.js';
 
 /**
  * Network + wallet state. A success state is only rendered when MetaMask is
@@ -44,7 +43,7 @@ export default function NetworkStatus() {
   return (
     <div
       className="flex items-center gap-2 rounded-[9px] border border-line bg-card px-2.5 py-1.5 text-[12px] text-ink-muted"
-      title={shortAddress(walletAddress)}
+      title="Connected to network"
     >
       <span className="dot bg-success shadow-[0_0_0_3px_rgba(22,133,104,0.12)]" aria-hidden="true" />
       <span className="hidden md:inline">{chainLabel(chainId)}</span>
@@ -58,10 +57,10 @@ export function WalletAddress() {
   return (
     <Link
       to="/citizen/profile"
-      className="hidden font-mono text-[12px] text-ink-muted transition hover:text-ink lg:inline"
-      title={walletAddress || user?.walletAddress || ''}
+      className="hidden text-[12px] text-ink-muted transition hover:text-ink lg:inline"
+      title="Wallet profile"
     >
-      {shortAddress(walletAddress || user?.walletAddress)}
+      Wallet
     </Link>
   );
 }

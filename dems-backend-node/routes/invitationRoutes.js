@@ -21,7 +21,7 @@ const router = express.Router();
 router.get('/token/:token', getInvitationByToken);
 
 // Protected invitation management
-router.post('/admin/create', protect, authorizeRoles('super_admin', 'admin'), createAdminInvitation);
+router.post('/admin/create', protect, authorizeRoles('super_admin'), createAdminInvitation);
 router.post('/employee/create', protect, authorizeRoles('admin'), createEmployeeInvitation);
 router.get('/pending/:organizationId', protect, getPendingInvitations);
 router.delete('/:invitationId/revoke', protect, revokeInvitation);

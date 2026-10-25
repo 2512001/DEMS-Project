@@ -13,7 +13,7 @@ import {
 } from 'lucide-react';
 
 import { getMyFiles } from '../../api/evidence.js';
-import EvidenceTable from '../../components/EvidenceTable.jsx';
+import SimpleEvidenceTable from '../../components/SimpleEvidenceTable.jsx';
 import PageHeader from '../../components/ui/PageHeader.jsx';
 import StatCard from '../../components/ui/StatCard.jsx';
 import { StatCardSkeleton, TableSkeleton } from '../../components/ui/Skeleton.jsx';
@@ -21,15 +21,15 @@ import { formatBytes } from '../../utils/format.js';
 
 const FILTERS = [
   { value: 'all', label: 'All files' },
-  { value: 'verified', label: 'Blockchain verified' },
-  { value: 'pending', label: 'Pending verification' },
-  { value: 'quarantine', label: 'Quarantine' }
+  { value: 'verified', label: 'Verified' },
+  { value: 'pending', label: 'Pending Verification' },
+  { value: 'needs_review', label: 'Needs Review' }
 ];
 
 function matchesFilter(file, filter) {
   if (filter === 'verified') return file.blockchainStatus === 'confirmed' || Boolean(file.blockchainTxHash);
   if (filter === 'pending') return file.blockchainStatus === 'pending' || file.status === 'pending_blockchain';
-  if (filter === 'quarantine') return Boolean(file.isQuarantine);
+  if (filter === 'needs_review') return file.blockchainStatus === 'failed';
   return true;
 }
 
@@ -58,13 +58,14 @@ export default function EvidenceVault() {
     return files.filter((file) => {
       if (!matchesFilter(file, filter)) return false;
       if (!needle) return true;
-      return [file.fileName, file.caseId, file.ipfsCID, file.fileHash]
+      return [file.fileName, file.caseId]
         .filter(Boolean)
         .some((value) => String(value).toLowerCase().includes(needle));
     });
   }, [files, filter, term]);
 
   const verified = files.filter((file) => file.blockchainStatus === 'confirmed' || file.blockchainTxHash).length;
+  const pending = files.filter((file) => file.blockchainStatus === 'pending' || file.status === 'pending_blockchain').length;
   const storedSize = files.reduce((total, file) => total + (Number(file.fileSize) || 0), 0);
   const loading = query.isLoading;
 
@@ -107,17 +108,17 @@ export default function EvidenceVault() {
             />
             <StatCard
               icon={ShieldCheck}
-              label="Blockchain verified"
+              label="Verified"
               value={verified}
-              detail={files.length ? `Across ${files.length} loaded files` : 'No proofs recorded yet'}
+              detail={`Across ${files.length} loaded files`}
               tone={verified > 0 ? 'success' : 'neutral'}
             />
             <StatCard
-              icon={UploadCloud}
-              label="Loaded size"
-              value={formatBytes(storedSize)}
-              detail="Encrypted before upload to IPFS"
-              tone="neutral"
+              icon={RefreshCcw}
+              label="Pending"
+              value={pending}
+              detail="Awaiting verification"
+              tone={pending > 0 ? 'neutral' : 'neutral'}
             />
           </>
         )}
@@ -130,7 +131,7 @@ export default function EvidenceVault() {
             <input
               value={term}
               onChange={(event) => setTerm(event.target.value)}
-              placeholder="Search by name, case ID, CID or hash"
+              placeholder="Search by name or case ID"
               className="input pl-8 pr-8"
               aria-label="Search files"
             />
@@ -175,7 +176,7 @@ export default function EvidenceVault() {
             </button>
           </div>
         ) : (
-          <EvidenceTable
+          <SimpleEvidenceTable
             files={visible}
             emptyTitle={files.length ? 'No files match this view' : 'Your vault is empty'}
             emptyDescription={

@@ -7,7 +7,36 @@ const { requireOrgAdmin, isAdmin } = require('../services/accessControl');
 const { writeAuditLog } = require('../services/auditService');
 const { ensureAdminOrganization } = require('../services/organizationService');
 
-const publicUserFields = '_id walletAddress role organizationId profile officerVerification.status officerVerification.requestedAt officerVerification.reviewedAt createdAt updatedAt';
+// Base user fields for public responses
+const baseUserFields = {
+    _id: 1,
+    walletAddress: 1,
+    role: 1,
+    organizationId: 1,
+    profile: 1,
+    createdAt: 1,
+    updatedAt: 1
+};
+
+// Extended fields for verification requests (includes officerVerification nested fields)
+const verificationUserFields = {
+    ...baseUserFields,
+    'officerVerification.status': 1,
+    'officerVerification.requestedAt': 1,
+    'officerVerification.reviewedAt': 1
+};
+
+// Extended fields for membership review (includes membership status fields)
+const membershipUserFields = {
+    ...baseUserFields,
+    membershipStatus: 1,
+    membershipReviewedBy: 1,
+    membershipReviewedAt: 1,
+    membershipRejectionReason: 1,
+    'officerVerification.status': 1,
+    'officerVerification.requestedAt': 1,
+    'officerVerification.reviewedAt': 1
+};
 
 const normalizeFiles = (files = {}) => {
     return Object.entries(files).flatMap(([fieldName, entries]) => {
@@ -52,7 +81,7 @@ const submitVerificationRequest = async (req, res, next) => {
             'officerVerification.requestedOrganizationId': targetOrganization._id
         };
 
-        const user = await User.findByIdAndUpdate(req.user.id, { $set: updates }, { new: true }).select(publicUserFields);
+        const user = await User.findByIdAndUpdate(req.user.id, { $set: updates }, { new: true }).select(baseUserFields);
         await writeAuditLog({
             actor: req.user,
             organizationId: targetOrganization._id,
@@ -106,7 +135,7 @@ const submitVerificationRequestByCode = async (req, res, next) => {
             'officerVerification.requestedOrganizationId': targetOrganization._id
         };
 
-        const user = await User.findByIdAndUpdate(req.user.id, { $set: updates }, { new: true }).select(publicUserFields);
+        const user = await User.findByIdAndUpdate(req.user.id, { $set: updates }, { new: true }).select(baseUserFields);
         await writeAuditLog({
             actor: req.user,
             organizationId: targetOrganization._id,
@@ -137,11 +166,38 @@ const getUsers = async (req, res, next) => {
             return res.status(403).json({ success: false, message: 'You must belong to an organization to access organization data.' });
         }
 
-        const users = await User.find({ organizationId: req.user.organizationId })
-            .select(publicUserFields)
+        const Group = require('../model/groupModel');
+        // Show active members AND pending approval requests (so admin can review them)
+        const users = await User.find({
+            organizationId: req.user.organizationId,
+            $or: [
+                { membershipStatus: 'active' },
+                { membershipStatus: 'pending_approval' }
+            ]
+        })
+            .select(baseUserFields)
             .sort({ createdAt: -1 });
 
-        return res.status(200).json({ success: true, count: users.length, data: users });
+        // Populate group information for each user
+        const usersWithGroups = await Promise.all(
+            users.map(async (user) => {
+                // Only show groups for active members
+                const groups = user.membershipStatus === 'active'
+                    ? await Group.find({
+                        organizationId: req.user.organizationId,
+                        members: user._id,
+                        isActive: true
+                    }).select('name _id')
+                    : [];
+
+                return {
+                    ...user.toObject(),
+                    groups
+                };
+            })
+        );
+
+        return res.status(200).json({ success: true, count: usersWithGroups.length, data: usersWithGroups });
     } catch (err) {
         if (err.statusCode) {
             return res.status(err.statusCode).json({ success: false, message: err.message });
@@ -152,26 +208,41 @@ const getUsers = async (req, res, next) => {
 
 const getVerificationRequests = async (req, res, next) => {
     try {
+        console.log('[VERIFICATION_REQUESTS] Fetching verification requests');
+        console.log('[VERIFICATION_REQUESTS] Req.user:', req.user);
+        console.log('[VERIFICATION_REQUESTS] Organization ID:', req.user.organizationId);
+        console.log('[VERIFICATION_REQUESTS] Role:', req.user.role);
+
         if (!isAdmin(req.user)) {
+            console.log('[VERIFICATION_REQUESTS] ERROR: User is not admin');
             return res.status(403).json({ success: false, message: 'You are not authorized to access this resource.' });
         }
 
         if (!req.user.organizationId) {
+            console.log('[VERIFICATION_REQUESTS] ERROR: User has no organization');
             return res.status(403).json({ success: false, message: 'You must belong to an organization to access organization data.' });
         }
 
         // Get both legacy officer verification requests and new membership status requests
-        const users = await User.find({
+        const query = {
             $or: [
                 { 'officerVerification.status': 'pending', 'officerVerification.requestedOrganizationId': req.user.organizationId },
                 { membershipStatus: 'pending_approval', organizationId: req.user.organizationId }
             ]
-        })
-            .select(`${publicUserFields} officerVerification membershipStatus membershipReviewedBy membershipReviewedAt membershipRejectionReason profile`)
+        };
+
+        console.log('[VERIFICATION_REQUESTS] Query:', JSON.stringify(query));
+
+        const users = await User.find(query)
+            .select(membershipUserFields)
             .sort({ createdAt: -1 });
+
+        console.log('[VERIFICATION_REQUESTS] Found users:', users.length);
+        console.log('[VERIFICATION_REQUESTS] User IDs:', users.map(u => u._id));
 
         return res.status(200).json({ success: true, count: users.length, data: users });
     } catch (err) {
+        console.error('[VERIFICATION_REQUESTS] ERROR:', err);
         if (err.statusCode) {
             return res.status(err.statusCode).json({ success: false, message: err.message });
         }
@@ -203,7 +274,7 @@ const reviewVerificationRequest = async (req, res, next) => {
             'officerVerification.reviewedAt': new Date()
         };
 
-        const existing = await User.findOne({ walletAddress: normalizedWallet }).select(`${publicUserFields} officerVerification`);
+        const existing = await User.findOne({ walletAddress: normalizedWallet }).select(verificationUserFields);
         if (!existing) {
             return res.status(404).json({ success: false, message: 'User not found for the provided wallet address.' });
         }
@@ -233,7 +304,7 @@ const reviewVerificationRequest = async (req, res, next) => {
             { walletAddress: normalizedWallet },
             { $set: updates },
             { new: true }
-        ).select(`${publicUserFields} officerVerification`);
+        ).select(verificationUserFields);
 
         await writeAuditLog({
             actor: req.user,
@@ -273,7 +344,7 @@ const reviewMembershipApplication = async (req, res, next) => {
             return res.status(400).json({ success: false, message: 'Valid user ID and status approved/rejected are required.' });
         }
 
-        const existing = await User.findById(userId).select(`${publicUserFields} membershipStatus membershipReviewedBy membershipReviewedAt membershipRejectionReason profile organizationId officerVerification`);
+        const existing = await User.findById(userId).select(membershipUserFields);
         if (!existing) {
             return res.status(404).json({ success: false, message: 'User not found.' });
         }
@@ -311,7 +382,7 @@ const reviewMembershipApplication = async (req, res, next) => {
             userId,
             { $set: updates },
             { new: true }
-        ).select(publicUserFields);
+        ).select(baseUserFields);
 
         // Send email notification
         const Organization = require('../model/organizationModel');
@@ -367,11 +438,53 @@ const getAuditLogs = async (req, res, next) => {
             return res.status(403).json({ success: false, message: 'You must belong to an organization to access organization data.' });
         }
 
-        const logs = await AuditLog.find({ organizationId: req.user.organizationId })
-            .sort({ createdAt: -1 })
-            .limit(100);
+        // Build filter from query parameters
+        const filter = { organizationId: req.user.organizationId };
 
-        return res.status(200).json({ success: true, count: logs.length, data: logs });
+        if (req.query.action) {
+            filter.action = req.query.action;
+        }
+
+        if (req.query.actorId) {
+            filter.actorId = req.query.actorId;
+        }
+
+        if (req.query.result) {
+            filter.result = req.query.result;
+        }
+
+        if (req.query.targetId) {
+            filter.targetId = req.query.targetId;
+        }
+
+        // Date range filter
+        if (req.query.startDate || req.query.endDate) {
+            filter.createdAt = {};
+            if (req.query.startDate) {
+                filter.createdAt.$gte = new Date(req.query.startDate);
+            }
+            if (req.query.endDate) {
+                filter.createdAt.$lte = new Date(req.query.endDate);
+            }
+        }
+
+        const limit = Math.min(parseInt(req.query.limit, 10) || 100, 500);
+        const skip = parseInt(req.query.skip, 10) || 0;
+
+        const [logs, total] = await Promise.all([
+            AuditLog.find(filter)
+                .sort({ createdAt: -1 })
+                .skip(skip)
+                .limit(limit),
+            AuditLog.countDocuments(filter)
+        ]);
+
+        return res.status(200).json({
+            success: true,
+            count: logs.length,
+            total,
+            data: logs
+        });
     } catch (err) {
         if (err.statusCode) {
             return res.status(err.statusCode).json({ success: false, message: err.message });
@@ -433,6 +546,89 @@ const upgradeOfficer = async (req, res, next) => {
     }
 };
 
+const getPlatformUsers = async (req, res, next) => {
+    try {
+        // Only super admin can access platform-wide user listing
+        if (req.user.role !== 'super_admin') {
+            return res.status(403).json({ success: false, message: 'Only Super Admin can access platform-wide user data.' });
+        }
+
+        const {
+            role,
+            organizationId,
+            membershipStatus,
+            search,
+            page = 1,
+            limit = 20
+        } = req.query;
+
+        const filter = {};
+
+        if (role) {
+            filter.role = role;
+        }
+
+        if (organizationId) {
+            filter.organizationId = organizationId;
+        }
+
+        if (membershipStatus) {
+            filter.membershipStatus = membershipStatus;
+        }
+
+        if (search) {
+            filter.$or = [
+                { 'profile.displayName': { $regex: search, $options: 'i' } },
+                { 'profile.email': { $regex: search, $options: 'i' } },
+                { walletAddress: { $regex: search, $options: 'i' } }
+            ];
+        }
+
+        const skip = (parseInt(page) - 1) * parseInt(limit);
+        const maxLimit = Math.min(parseInt(limit), 100);
+
+        const [users, total] = await Promise.all([
+            User.find(filter)
+                .select('_id walletAddress role organizationId membershipStatus profile.displayName profile.email profile.phone accountStatus createdAt')
+                .sort({ createdAt: -1 })
+                .skip(skip)
+                .limit(maxLimit),
+            User.countDocuments(filter)
+        ]);
+
+        // Populate organization names if needed
+        const Organization = require('../model/organizationModel');
+        const usersWithOrgNames = await Promise.all(
+            users.map(async (user) => {
+                if (user.organizationId) {
+                    const org = await Organization.findById(user.organizationId).select('name organizationCode');
+                    return {
+                        ...user.toObject(),
+                        organizationName: org?.name || 'Unknown',
+                        organizationCode: org?.organizationCode || 'Unknown'
+                    };
+                }
+                return {
+                    ...user.toObject(),
+                    organizationName: null,
+                    organizationCode: null
+                };
+            })
+        );
+
+        return res.status(200).json({
+            success: true,
+            count: usersWithOrgNames.length,
+            total,
+            page: parseInt(page),
+            limit: maxLimit,
+            data: usersWithOrgNames
+        });
+    } catch (err) {
+        next(err);
+    }
+};
+
 module.exports = {
     submitVerificationRequest,
     submitVerificationRequestByCode,
@@ -441,5 +637,6 @@ module.exports = {
     reviewVerificationRequest,
     reviewMembershipApplication,
     getAuditLogs,
-    upgradeOfficer
+    upgradeOfficer,
+    getPlatformUsers
 };

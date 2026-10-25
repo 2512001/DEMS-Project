@@ -7,6 +7,7 @@ const {
     getEvidenceById,
     getUploadPolicy,
     getOrganizationEvidence,
+    getPlatformEvidence,
     markBlockchainFailed,
     retryBlockchainRegistration,
     checkWalletBalance
@@ -26,6 +27,7 @@ router.post('/:evidenceId/retry-blockchain', protect, retryBlockchainRegistratio
 router.get('/wallet/:address/balance', checkWalletBalance);
 router.get('/my-files', protect, getMyFiles);
 router.get('/organization', protect, authorizeRoles('admin'), getOrganizationEvidence);
+router.get('/platform', protect, authorizeRoles('super_admin'), getPlatformEvidence);
 router.get('/download/:id', protect, getEvidenceById);
 router.get('/case/:caseId', protect, authorizeRoles('officer', 'admin', 'citizen'), getEvidenceByCase);
 router.get('/:id', protect, getEvidenceById);

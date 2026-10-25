@@ -4,8 +4,11 @@ const authorizeRoles = (...roles) => {
             return res.status(401).json({ success: false, message: 'Authentication required.' });
         }
 
+        console.log('[RBAC] Checking authorization - User role:', req.user.role, 'Required roles:', roles, 'Wallet:', req.user.walletAddress);
+
         // Super admin has access to all admin routes
         if (req.user.role === 'super_admin' && roles.includes('admin')) {
+            console.log('[RBAC] Access granted - Super admin accessing admin route');
             return next();
         }
 
@@ -14,6 +17,7 @@ const authorizeRoles = (...roles) => {
             return res.status(403).json({ success: false, message: 'You are not authorized to access this resource.' });
         }
 
+        console.log('[RBAC] Access granted - Role matches');
         next();
     };
 };

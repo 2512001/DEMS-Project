@@ -28,7 +28,7 @@ export default function ChainOfCustody() {
     const needle = term.trim().toLowerCase();
     if (!needle) return custodyFiles;
     return custodyFiles.filter((file) =>
-      [file.fileName, file.caseId, file.blockchainTxHash]
+      [file.fileName, file.caseId]
         .filter(Boolean)
         .some((value) => String(value).toLowerCase().includes(needle))
     );

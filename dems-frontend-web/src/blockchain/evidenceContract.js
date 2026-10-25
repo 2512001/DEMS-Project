@@ -166,7 +166,7 @@ export async function addEvidenceOnChain(payload) {
 
   if (expectedUploader && expectedUploader.toLowerCase() !== wallet.toLowerCase()) {
     throw new Error(
-      `MetaMask account ${wallet} does not match the uploader ${expectedUploader}. Switch MetaMask to the wallet you used to sign in.`
+      `The MetaMask account does not match the evidence uploader. Please sign in to DEMS with the same wallet you used for this evidence.`
     );
   }
 

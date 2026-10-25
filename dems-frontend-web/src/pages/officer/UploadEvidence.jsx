@@ -27,8 +27,8 @@ import {
   checkWalletBalance,
   uploadEvidence
 } from '../../api/evidence.js';
+import { getUserGroups } from '../../api/groups.js';
 import { addEvidenceOnChain, EVIDENCE_CONTRACT_ADDRESS } from '../../blockchain/evidenceContract.js';
-import HashValue from '../../components/HashValue.jsx';
 import StatusBadge from '../../components/StatusBadge.jsx';
 import PageHeader from '../../components/ui/PageHeader.jsx';
 import { useAuth } from '../../auth/AuthContext.jsx';
@@ -71,10 +71,13 @@ export default function UploadEvidence() {
   const [selectedFile, setSelectedFile] = useState(null);
   const [dragging, setDragging] = useState(false);
   const [diagnostics, setDiagnostics] = useState(null);
+  const [selectedGroup, setSelectedGroup] = useState('');
   const pendingFormData = useRef(null);
 
   const policyQuery = useQuery({ queryKey: ['upload-policy'], queryFn: getUploadPolicy });
+  const groupsQuery = useQuery({ queryKey: ['user-groups'], queryFn: getUserGroups, enabled: isEmployee });
   const policy = policyQuery.data;
+  const groups = groupsQuery.data?.data || [];
   const aiRequired = Boolean(policy?.requireAIForEmployees);
   const chainRequired = Boolean(policy?.requireBlockchainForEmployees);
   const aiEnabled = isEmployee ? (aiRequired || requestAI) : requestAI;
@@ -254,6 +257,7 @@ export default function UploadEvidence() {
     if (values.caseId) formData.append('caseId', values.caseId);
     formData.append('requestAI', String(aiEnabled));
     formData.append('requestBlockchain', String(chainEnabled));
+    if (selectedGroup) formData.append('groupId', selectedGroup);
     Object.entries(extra).forEach(([key, value]) => formData.append(key, String(value)));
     formData.append('captureMetadata', JSON.stringify({
       deviceInfo: navigator.userAgent,
@@ -415,10 +419,35 @@ export default function UploadEvidence() {
               <span className="label">Case ID <span className="font-normal text-ink-faint">(optional)</span></span>
               <input className="input" placeholder="CASE-2026-001" {...form.register('caseId')} />
             </label>
-            <label className="block">
-              <span className="label">Captured at</span>
-              <input className="input" type="datetime-local" {...form.register('capturedAt')} />
-            </label>
+            {isEmployee && groups.length > 0 ? (
+              <label className="block">
+                <span className="label">Group <span className="font-normal text-ink-faint">(optional)</span></span>
+                <select
+                  className="input"
+                  value={selectedGroup}
+                  onChange={(e) => setSelectedGroup(e.target.value)}
+                >
+                  <option value="">No group</option>
+                  {groups.map((group) => (
+                    <option key={group._id} value={group._id}>
+                      {group.name}
+                    </option>
+                  ))}
+                </select>
+                <span className="hint">Assign evidence to a group for team access.</span>
+              </label>
+            ) : (
+              <label className="block">
+                <span className="label">Captured at</span>
+                <input className="input" type="datetime-local" {...form.register('capturedAt')} />
+              </label>
+            )}
+            {!isEmployee || groups.length === 0 ? (
+              <label className="block sm:col-span-2">
+                <span className="label">Captured at</span>
+                <input className="input" type="datetime-local" {...form.register('capturedAt')} />
+              </label>
+            ) : null}
             <label className="block sm:col-span-2">
               <span className="label">Device fingerprint</span>
               <input className="input bg-[#FBFCFD] text-ink-muted" readOnly {...form.register('deviceInfo')} />
@@ -601,22 +630,22 @@ export default function UploadEvidence() {
               <dl className="mt-4 space-y-3">
                 <div>
                   <dt className="detail-label">File ID</dt>
-                  <dd className="mt-0.5"><HashValue value={uploadResult.evidenceId || uploadResult.quarantineId} compact={false} /></dd>
+                  <dd className="mt-0.5"><span className="text-[13px] text-ink">Available</span></dd>
                 </div>
                 <div>
-                  <dt className="detail-label">File hash</dt>
-                  <dd className="mt-0.5"><HashValue value={uploadResult.fileHash} compact={false} /></dd>
+                  <dt className="detail-label">File integrity</dt>
+                  <dd className="mt-0.5"><span className="text-[13px] text-ink">Available</span></dd>
                 </div>
                 {uploadResult.ipfsCID ? (
                   <div>
-                    <dt className="detail-label">IPFS CID</dt>
-                    <dd className="mt-0.5"><HashValue value={uploadResult.ipfsCID} compact={false} /></dd>
+                    <dt className="detail-label">IPFS storage</dt>
+                    <dd className="mt-0.5"><span className="text-[13px] text-ink">Stored on IPFS</span></dd>
                   </div>
                 ) : null}
                 {txHash ? (
                   <div>
-                    <dt className="detail-label">Transaction hash</dt>
-                    <dd className="mt-0.5"><HashValue value={txHash} compact={false} /></dd>
+                    <dt className="detail-label">Blockchain transaction</dt>
+                    <dd className="mt-0.5"><span className="text-[13px] text-ink">Recorded on blockchain</span></dd>
                   </div>
                 ) : null}
               </dl>

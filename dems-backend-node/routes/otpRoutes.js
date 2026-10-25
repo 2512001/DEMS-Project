@@ -25,28 +25,30 @@ function maskContact(value) {
 // Request email OTP
 router.post('/email/request', attachUserIfPresent, async (req, res, next) => {
     try {
-        console.log('[EMPLOYEE EMAIL VERIFY] OTP request called');
-        console.log('[EMPLOYEE EMAIL VERIFY] Request body:', req.body);
-        console.log('[EMPLOYEE EMAIL VERIFY] Authenticated user:', req.user?.id);
+        console.log('[OTP REQUEST] ======');
+        console.log('[OTP REQUEST] OTP request called');
+        console.log('[OTP REQUEST] Request body:', req.body);
+        console.log('[OTP REQUEST] Authenticated user:', req.user?.id);
         
         const { email } = req.body;
 
         if (!email || !email.includes('@')) {
-            console.log('[EMPLOYEE EMAIL VERIFY] Invalid email');
+            console.log('[OTP REQUEST] ERROR: Invalid email');
             return res.status(400).json({ success: false, message: 'Valid email is required.' });
         }
 
-        console.log('[EMPLOYEE EMAIL VERIFY] Email:', email);
+        console.log('[OTP REQUEST] Email:', email);
+        console.log('[OTP REQUEST] Email (normalized):', email.toLowerCase());
 
         // Check if user already exists with this email
         const existingUser = await User.findOne({ 'profile.email': email.toLowerCase() }).select('_id role profile.emailVerified organizationId');
-        console.log('[EMPLOYEE EMAIL VERIFY] Existing user check - user:', existingUser?._id, 'emailVerified:', existingUser?.profile?.emailVerified, 'organizationId:', existingUser?.organizationId);
+        console.log('[OTP REQUEST] Existing user check - user:', existingUser?._id, 'emailVerified:', existingUser?.profile?.emailVerified, 'organizationId:', existingUser?.organizationId);
         
         // For employee invitation flow, always allow OTP send even if email was previously verified
         // The invitation acceptance sets emailVerified to false to force re-verification
         // Only skip OTP if user is already verified AND has an organization (completed onboarding)
         if (existingUser && existingUser.profile && existingUser.profile.emailVerified && existingUser.organizationId) {
-            console.log('[EMPLOYEE EMAIL VERIFY] Email already verified and user has organization - skipping OTP');
+            console.log('[OTP REQUEST] Email already verified and user has organization - skipping OTP');
             return res.status(200).json({
                 success: true,
                 message: 'Email is already verified.',
@@ -56,19 +58,19 @@ router.post('/email/request', attachUserIfPresent, async (req, res, next) => {
         
         // If user is verified but has no organization (employee onboarding in progress), reset verification to force OTP
         if (existingUser && existingUser.profile && existingUser.profile.emailVerified && !existingUser.organizationId) {
-            console.log('[EMPLOYEE EMAIL VERIFY] User verified but no organization - resetting emailVerified to force OTP');
+            console.log('[OTP REQUEST] User verified but no organization - resetting emailVerified to force OTP');
             existingUser.profile.emailVerified = false;
             existingUser.profile.emailVerifiedAt = null;
             await existingUser.save();
         }
         
-        console.log('[EMPLOYEE EMAIL VERIFY] Proceeding with OTP generation');
+        console.log('[OTP REQUEST] Proceeding with OTP generation');
 
         // Check resend cooldown
         const canResend = await canResendOTP(email, 'email');
-        console.log('[EMPLOYEE EMAIL VERIFY] Can resend:', canResend.canResend);
+        console.log('[OTP REQUEST] Can resend:', canResend.canResend);
         if (!canResend.canResend) {
-            console.log('[EMPLOYEE EMAIL VERIFY] Resend cooldown active');
+            console.log('[OTP REQUEST] ERROR: Resend cooldown active');
             return res.status(429).json({ success: false, message: canResend.error });
         }
 
@@ -76,10 +78,10 @@ router.post('/email/request', attachUserIfPresent, async (req, res, next) => {
         const userName = existingUser?.profile?.displayName || existingUser?.profile?.name || '';
 
         // Create OTP
-        console.log('[EMPLOYEE EMAIL VERIFY] Creating OTP');
+        console.log('[OTP REQUEST] Creating OTP');
         const { otp, expiresAt } = await createOTP(email, 'email');
-        console.log('[EMPLOYEE EMAIL VERIFY] OTP generated: YES');
-        console.log('[EMPLOYEE EMAIL VERIFY] OTP expires at:', expiresAt);
+        console.log('[OTP REQUEST] OTP generated:', otp);
+        console.log('[OTP REQUEST] OTP expires at:', expiresAt);
 
         // Send email
         const greeting = userName ? `Hello ${userName},` : 'Hello,';
@@ -96,7 +98,7 @@ router.post('/email/request', attachUserIfPresent, async (req, res, next) => {
             </div>
         `;
 
-        console.log('[EMPLOYEE EMAIL VERIFY] Calling email service');
+        console.log('[OTP REQUEST] Calling email service');
         const emailResult = await sendEmail({
             to: email,
             subject: 'Verify your email address - DEMS',
@@ -104,11 +106,11 @@ router.post('/email/request', attachUserIfPresent, async (req, res, next) => {
             text: `${greeting}\n\nYour verification code for DEMS is: ${otp}\n\nThis code will expire in 10 minutes.\n\nIf you did not request this code, please ignore this email.\n\nDEMS - Decentralized Evidence Management System`
         });
 
-        console.log('[EMPLOYEE EMAIL VERIFY] Email service called: YES');
-        console.log('[EMPLOYEE EMAIL VERIFY] Email result:', emailResult);
+        console.log('[OTP REQUEST] Email service called');
+        console.log('[OTP REQUEST] Email result:', emailResult);
 
         if (!emailResult.success) {
-            console.log('[EMPLOYEE EMAIL VERIFY] Email sending failed:', emailResult.error);
+            console.log('[OTP REQUEST] ERROR: Email sending failed:', emailResult.error);
             return res.status(502).json({
                 success: false,
                 message: emailResult.status === 'not_configured'
@@ -119,9 +121,10 @@ router.post('/email/request', attachUserIfPresent, async (req, res, next) => {
             });
         }
 
-        console.log('[EMPLOYEE EMAIL VERIFY] SMTP send attempted: YES');
-        console.log('[EMPLOYEE EMAIL VERIFY] SMTP result:', emailResult.status);
-        console.log('[EMPLOYEE EMAIL VERIFY] Message ID:', emailResult.messageId);
+        console.log('[OTP REQUEST] SMTP send attempted: YES');
+        console.log('[OTP REQUEST] SMTP result:', emailResult.status);
+        console.log('[OTP REQUEST] Message ID:', emailResult.messageId);
+        console.log('[OTP REQUEST] ======');
 
         res.status(200).json({
             success: true,
@@ -130,8 +133,8 @@ router.post('/email/request', attachUserIfPresent, async (req, res, next) => {
             emailStatus: emailResult.status
         });
     } catch (err) {
-        console.error('[EMPLOYEE EMAIL VERIFY] Error:', err);
-        console.error('[EMPLOYEE EMAIL VERIFY] Error stack:', err.stack);
+        console.error('[OTP REQUEST] ERROR:', err);
+        console.error('[OTP REQUEST] Error stack:', err.stack);
         next(err);
     }
 });
@@ -139,19 +142,31 @@ router.post('/email/request', attachUserIfPresent, async (req, res, next) => {
 // Verify email OTP
 router.post('/email/verify', attachUserIfPresent, async (req, res, next) => {
     try {
+        console.log('[OTP VERIFY] ======');
+        console.log('[OTP VERIFY] OTP verify called');
+        console.log('[OTP VERIFY] Request body:', req.body);
+        console.log('[OTP VERIFY] Authenticated user:', req.user?.id);
+        
         const { email, otp } = req.body;
 
         if (!email || !otp) {
+            console.log('[OTP VERIFY] ERROR: Missing email or OTP');
             return res.status(400).json({ success: false, message: 'Email and OTP are required.' });
         }
 
+        console.log('[OTP VERIFY] Email:', email);
+        console.log('[OTP VERIFY] Verifying OTP...');
+
         const result = await verifyOTP(email, otp, 'email');
+        console.log('[OTP VERIFY] OTP verification result:', result.success);
 
         if (!result.success) {
+            console.log('[OTP VERIFY] ERROR: OTP verification failed:', result.error);
             return res.status(400).json({ success: false, message: result.error, attemptsRemaining: result.attemptsRemaining });
         }
 
         const emailLower = email.toLowerCase();
+        console.log('[OTP VERIFY] Marking email as verified in service:', emailLower);
         // Record the verified email as a server-side fact (EMAIL_VERIFIED state),
         // separate from EMAIL_SENT. This is what onboarding enforcement checks.
         markEmailVerified(emailLower);
@@ -162,15 +177,25 @@ router.post('/email/verify', attachUserIfPresent, async (req, res, next) => {
         // already theirs, so one user cannot verify another user's email.
         let targetUser = null;
         if (req.user?.id) {
+            console.log('[OTP VERIFY] Finding user by authenticated ID:', req.user.id);
             targetUser = await User.findById(req.user.id);
         }
         if (!targetUser) {
+            console.log('[OTP VERIFY] Finding user by email:', emailLower);
             targetUser = await User.findOne({ 'profile.email': emailLower });
         }
+        
         if (targetUser) {
+            console.log('[OTP VERIFY] Target user found:', targetUser._id);
+            console.log('[OTP VERIFY] Target user current email:', targetUser.profile?.email);
+            console.log('[OTP VERIFY] Target user current emailVerified:', targetUser.profile?.emailVerified);
+            
             const owner = await User.findOne({ 'profile.email': emailLower }).select('_id');
             const emailFreeOrMine = !owner || owner._id.toString() === targetUser._id.toString();
+            console.log('[OTP VERIFY] Email free or mine:', emailFreeOrMine);
+            
             if (emailFreeOrMine) {
+                console.log('[OTP VERIFY] Updating user emailVerified to true');
                 targetUser.profile = {
                     ...(targetUser.profile?.toObject?.() || targetUser.profile || {}),
                     email: emailLower,
@@ -178,11 +203,18 @@ router.post('/email/verify', attachUserIfPresent, async (req, res, next) => {
                     emailVerifiedAt: new Date()
                 };
                 await targetUser.save();
+                console.log('[OTP VERIFY] User saved successfully');
+            } else {
+                console.log('[OTP VERIFY] WARNING: Email belongs to another user, not updating');
             }
+        } else {
+            console.log('[OTP VERIFY] No target user found to persist verification');
         }
 
+        console.log('[OTP VERIFY] ======');
         return res.status(200).json({ success: true, message: 'Email verified successfully', emailVerified: true });
     } catch (err) {
+        console.error('[OTP VERIFY] ERROR:', err);
         next(err);
     }
 });

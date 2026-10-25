@@ -45,4 +45,20 @@ const upload = multer({
     }
 });
 
+// Memory storage for controlled upload workflow (direct buffer access)
+const memoryStorage = multer.memoryStorage();
+
+const uploadMemory = multer({
+    storage: memoryStorage,
+    limits: { fileSize: 50 * 1024 * 1024 },
+    fileFilter: (_req, file, cb) => {
+        if (allowedMimeTypes.has(file.mimetype)) {
+            cb(null, true);
+            return;
+        }
+        cb(new Error('Unsupported file type.'));
+    }
+});
+
 module.exports = upload;
+module.exports.uploadMemory = uploadMemory;

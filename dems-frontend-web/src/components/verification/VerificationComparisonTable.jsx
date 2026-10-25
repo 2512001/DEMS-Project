@@ -1,9 +1,10 @@
 import React from 'react';
-import { CheckCircle2, XCircle } from 'lucide-react';
+import { CheckCircle2, XCircle, Clock } from 'lucide-react';
 
-function displayValue(value) {
+function displayValue(value, matched) {
   if (value === null || value === undefined || value === '') return '—';
-  return String(value);
+  if (matched) return 'Matched';
+  return 'Available';
 }
 
 export default function VerificationComparisonTable({ checks = [], mismatches = [] }) {
@@ -42,19 +43,27 @@ export default function VerificationComparisonTable({ checks = [], mismatches = 
           <tbody>
             {rows.map((item) => {
               const matched = item.matched !== false && item.status !== 'MISMATCH';
+              const incomplete = item.status === 'INCOMPLETE' || item.status === 'NOT_REQUESTED';
               return (
                 <tr key={item.field}>
                   <td className="font-medium capitalize text-ink">
                     {String(item.label || item.field).replaceAll(/([A-Z])/g, ' $1')}
                   </td>
-                  <td><span className="break-anywhere font-mono text-[11.5px] text-ink-muted">{displayValue(item.mongodb)}</span></td>
-                  <td><span className="break-anywhere font-mono text-[11.5px] text-ink-muted">{displayValue(item.ipfs)}</span></td>
-                  <td><span className="break-anywhere font-mono text-[11.5px] text-ink-muted">{displayValue(item.blockchain)}</span></td>
+                  <td><span className="text-[12px] text-ink-muted">{displayValue(item.mongodb, matched)}</span></td>
+                  <td><span className="text-[12px] text-ink-muted">{displayValue(item.ipfs, matched)}</span></td>
+                  <td><span className="text-[12px] text-ink-muted">{displayValue(item.blockchain, matched)}</span></td>
                   <td>
-                    <span className={matched ? 'badge-success' : 'badge-danger'}>
-                      {matched ? <CheckCircle2 size={11} /> : <XCircle size={11} />}
-                      {matched ? 'Match' : 'Mismatch'}
-                    </span>
+                    {incomplete ? (
+                      <span className="badge-neutral">
+                        <Clock size={11} />
+                        Pending
+                      </span>
+                    ) : (
+                      <span className={matched ? 'badge-success' : 'badge-danger'}>
+                        {matched ? <CheckCircle2 size={11} /> : <XCircle size={11} />}
+                        {matched ? 'Match' : 'Mismatch'}
+                      </span>
+                    )}
                   </td>
                 </tr>
               );

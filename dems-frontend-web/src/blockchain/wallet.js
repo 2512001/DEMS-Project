@@ -76,9 +76,16 @@ function sepoliaNetworkParams() {
 }
 
 async function currentChainId() {
-  return String(
-    await window.ethereum.request({ method: 'eth_chainId' })
-  ).toLowerCase();
+  const chainId = await window.ethereum.request({ method: 'eth_chainId' });
+  // MetaMask returns the chain ID with or without 0x prefix
+  // We need to return it in lowercase without double 0x
+  let formatted = String(chainId).toLowerCase();
+  if (formatted.startsWith('0x0x')) {
+    formatted = formatted.slice(2);
+  } else if (!formatted.startsWith('0x')) {
+    formatted = '0x' + formatted;
+  }
+  return formatted;
 }
 
 export async function ensureRequiredNetwork() {

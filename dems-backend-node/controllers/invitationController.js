@@ -8,6 +8,7 @@ const {
 const { createAdminInvitation: createAdminInvitationRecord } = require('../services/invitationService');
 const { isEmailVerified } = require('../services/otpService');
 const { httpError } = require('../services/accessControl');
+const { notifyOrganizationAdmins } = require('../services/notificationService');
 
 function normalizeEmail(value) {
     return String(value || '').trim().toLowerCase();
@@ -44,15 +45,35 @@ function assertEmailMatch(invitation, user, submittedEmail) {
     const submitted = normalizeEmail(submittedEmail);
     const profileEmail = normalizeEmail(user.profile?.email);
 
+    console.log('[EMAIL MATCH DEBUG] ======');
+    console.log('[EMAIL MATCH DEBUG] Invitation.invitedEmail:', invitation.invitedEmail);
+    console.log('[EMAIL MATCH DEBUG] Invitation.invitedEmail (normalized):', invited);
+    console.log('[EMAIL MATCH DEBUG] User.profile.email:', user.profile?.email);
+    console.log('[EMAIL MATCH DEBUG] User.profile.email (normalized):', profileEmail);
+    console.log('[EMAIL MATCH DEBUG] req.body.email:', submittedEmail);
+    console.log('[EMAIL MATCH DEBUG] req.body.email (normalized):', submitted);
+    console.log('[EMAIL MATCH DEBUG] user.profile.emailVerified:', user.profile?.emailVerified);
+    console.log('[EMAIL MATCH DEBUG] ======');
+
+    // If user explicitly submitted an email that doesn't match invitation, reject
     if (submitted && submitted !== invited) {
+        console.log('[EMAIL MATCH DEBUG] REJECTING: Submitted email does not match invitation email');
         throw httpError(403, 'The verified email must match the invitation email.');
     }
+
+    // If user has a profile email that differs from invitation but is verified, that's OK for employee onboarding
+    // The email will be updated from the invitation during application submission
     if (profileEmail && profileEmail !== invited) {
-        throw httpError(403, 'This invitation is not for the email address on your account.');
+        console.log('[EMAIL MATCH DEBUG] Profile email differs from invitation - this is OK for employee onboarding');
     }
+
+    // If no email submitted and no profile email, require email confirmation
     if (!submitted && !profileEmail) {
+        console.log('[EMAIL MATCH DEBUG] REJECTING: No email provided');
         throw httpError(400, 'Confirm the invited email address before accepting.');
     }
+
+    console.log('[EMAIL MATCH DEBUG] Email validation passed');
 }
 
 async function assertEmailAvailable(email, currentUserId) {
@@ -74,6 +95,11 @@ function publicOrganization(organization) {
 
 async function createAdminInvitation(req, res, next) {
     try {
+        // Only super admin can create organization admin invitations
+        if (req.user.role !== 'super_admin') {
+            throw httpError(403, 'Only Super Admin can create organization administrator invitations.');
+        }
+
         const { organizationId, invitedEmail, invitedName } = req.body;
         const { invitation, emailResult } = await createAdminInvitationRecord({
             organizationId,
@@ -275,15 +301,17 @@ async function acceptAdminInvitation(req, res, next) {
 
 async function acceptEmployeeInvitation(req, res, next) {
     try {
+        console.log('[INVITATION ACCEPT] ======');
         console.log('[INVITATION ACCEPT] acceptEmployeeInvitation called');
         console.log('[INVITATION ACCEPT] Token:', req.params.token);
-        console.log('[INVITATION ACCEPT] Request body:', req.body);
+        console.log('[INVITATION ACCEPT] Request body:', JSON.stringify(req.body));
         console.log('[INVITATION ACCEPT] Request user:', req.user);
         
         const invitation = await loadInvitation(req.params.token, 'employee');
         console.log('[INVITATION ACCEPT] Invitation loaded:', invitation._id);
         console.log('[INVITATION ACCEPT] Invitation status:', invitation.status);
-        console.log('[INVITATION ACCEPT] Invitation email:', invitation.invitedEmail);
+        console.log('[INVITATION ACCEPT] Invitation invitedEmail:', invitation.invitedEmail);
+        console.log('[INVITATION ACCEPT] Invitation invitedName:', invitation.invitedName);
         console.log('[INVITATION ACCEPT] Invitation expiresAt:', invitation.expiresAt);
         console.log('[INVITATION ACCEPT] Current time:', new Date());
         console.log('[INVITATION ACCEPT] Remaining time:', new Date(invitation.expiresAt) - new Date());
@@ -313,27 +341,35 @@ async function acceptEmployeeInvitation(req, res, next) {
         }
 
         const user = await loadDbUser(req.user);
-        console.log('[INVITATION ACCEPT] User loaded:', user._id, 'role:', user.role);
-        console.log('[INVITATION ACCEPT] User profile email:', user.profile?.email);
+        console.log('[INVITATION ACCEPT] User loaded:', user._id);
+        console.log('[INVITATION ACCEPT] User role:', user.role);
+        console.log('[INVITATION ACCEPT] User profile.email:', user.profile?.email);
+        console.log('[INVITATION ACCEPT] User profile.emailVerified:', user.profile?.emailVerified);
         
         const submittedEmail = normalizeEmail(req.body?.email || user.profile?.email);
-        console.log('[INVITATION ACCEPT] Submitted email:', submittedEmail);
+        console.log('[INVITATION ACCEPT] Submitted email from req.body:', req.body?.email);
+        console.log('[INVITATION ACCEPT] Submitted email from user.profile:', user.profile?.email);
+        console.log('[INVITATION ACCEPT] Final submittedEmail:', submittedEmail);
         
         // Log email matching check
         const invited = normalizeEmail(invitation.invitedEmail);
         const profileEmail = normalizeEmail(user.profile?.email);
-        console.log('[INVITATION ACCEPT] Invited email:', invited);
-        console.log('[INVITATION ACCEPT] Profile email:', profileEmail);
+        console.log('[INVITATION ACCEPT] Invited email (normalized):', invited);
+        console.log('[INVITATION ACCEPT] Profile email (normalized):', profileEmail);
         console.log('[INVITATION ACCEPT] Email match check - submittedEmail:', submittedEmail, 'invited:', invited, 'profile:', profileEmail);
         
-        // If user has no email yet, we'll set it from the invitation
-        // This is expected for new users accepting invitations
-        if (!submittedEmail || !profileEmail) {
-            console.log('[INVITATION ACCEPT] User has no email yet, will set from invitation');
-        } else {
-            assertEmailMatch(invitation, user, submittedEmail);
-            await assertEmailAvailable(invitation.invitedEmail, user._id);
+        // For employee onboarding, always allow the invitation to be accepted
+        // The email will be set from the invitation during the process
+        // Only reject if user explicitly submits a different email
+        if (req.body?.email && normalizeEmail(req.body.email) !== invited) {
+            console.log('[INVITATION ACCEPT] ERROR: User explicitly submitted email that differs from invitation');
+            return res.status(403).json({
+                success: false,
+                message: 'The verified email must match the invitation email.'
+            });
         }
+        
+        console.log('[INVITATION ACCEPT] Email validation passed');
 
         if (user.role === 'admin' || user.role === 'super_admin') {
             console.log('[INVITATION ACCEPT] User is admin/super_admin, rejecting');
@@ -364,7 +400,10 @@ async function acceptEmployeeInvitation(req, res, next) {
             emailVerifiedAt: null
         };
         await user.save();
-        console.log('[INVITATION ACCEPT] User profile updated, emailVerified set to false');
+        console.log('[INVITATION ACCEPT] User profile updated');
+        console.log('[INVITATION ACCEPT] User profile.email after update:', user.profile.email);
+        console.log('[INVITATION ACCEPT] User profile.emailVerified after update:', user.profile.emailVerified);
+        console.log('[INVITATION ACCEPT] ======');
 
         res.json({
             success: true,
@@ -393,31 +432,80 @@ async function acceptEmployeeInvitation(req, res, next) {
 
 async function submitEmployeeApplication(req, res, next) {
     try {
+        console.log('[SUBMIT APP] ======');
+        console.log('[SUBMIT APP] submitEmployeeApplication called');
+        console.log('[SUBMIT APP] Token:', req.params.token);
+        console.log('[SUBMIT APP] Request body:', JSON.stringify(req.body));
+        console.log('[SUBMIT APP] Request user:', req.user);
+        
         const invitation = await loadInvitation(req.params.token, 'employee');
+        console.log('[SUBMIT APP] Invitation loaded:', invitation._id);
+        console.log('[SUBMIT APP] Invitation status:', invitation.status);
+        console.log('[SUBMIT APP] Invitation invitedEmail:', invitation.invitedEmail);
+        console.log('[SUBMIT APP] Invitation invitedName:', invitation.invitedName);
+        console.log('[SUBMIT APP] Invitation acceptedBy:', invitation.acceptedBy);
+        
         const user = await loadDbUser(req.user);
+        console.log('[SUBMIT APP] User loaded:', user._id);
+        console.log('[SUBMIT APP] User role:', user.role);
+        console.log('[SUBMIT APP] User profile.email:', user.profile?.email);
+        console.log('[SUBMIT APP] User profile.emailVerified:', user.profile?.emailVerified);
+        console.log('[SUBMIT APP] User organizationId:', user.organizationId);
+        
         const documents = req.files ? req.files.documents : [];
+        console.log('[SUBMIT APP] Documents count:', documents.length);
 
         if (invitation.status !== 'accepted') {
+            console.log('[SUBMIT APP] ERROR: Invitation not accepted, status:', invitation.status);
             throw httpError(400, 'Accept the invitation before submitting an application.');
         }
         if (!invitation.acceptedBy || invitation.acceptedBy.toString() !== user._id.toString()) {
+            console.log('[SUBMIT APP] ERROR: Invitation not for this user');
             throw httpError(403, 'This invitation is not for your account');
         }
         if (!documents.length) {
+            console.log('[SUBMIT APP] ERROR: No documents');
             throw httpError(400, 'At least one verification document is required.');
         }
 
         // CRITICAL: Never downgrade Super Admins or Admins
         if (user.role === 'super_admin' || user.role === 'admin') {
+            console.log('[SUBMIT APP] ERROR: User is admin/super_admin');
             throw httpError(409, 'Administrator accounts cannot submit employee applications.');
         }
 
         // Enforce email verification server-side so it cannot be bypassed by
         // calling this endpoint directly. EMAIL_VERIFIED is persisted on the
         // user (survives restarts) with the in-memory OTP store as a fallback.
-        const emailVerified = Boolean(user.profile?.emailVerified) || isEmailVerified(invitation.invitedEmail);
-        if (!emailVerified) {
+        // For employee onboarding, accept verification of either:
+        // 1. The user's current email, OR
+        // 2. The invitation email
+        // The email will be updated to the invitation email during this submission
+        const userEmail = user.profile?.email;
+        const invitationEmail = invitation.invitedEmail;
+        
+        console.log('[SUBMIT APP] User current email:', userEmail);
+        console.log('[SUBMIT APP] Invitation email:', invitationEmail);
+        console.log('[SUBMIT APP] Checking email verification...');
+        
+        // Check if user's current email is verified OR if invitation email is verified
+        const userCurrentEmailVerified = Boolean(user.profile?.emailVerified) || isEmailVerified(userEmail);
+        const invitationEmailVerified = isEmailVerified(invitationEmail);
+        
+        console.log('[SUBMIT APP] User email verified:', userCurrentEmailVerified);
+        console.log('[SUBMIT APP] Invitation email verified:', invitationEmailVerified);
+        
+        // Allow submission if either email is verified
+        if (!userCurrentEmailVerified && !invitationEmailVerified) {
+            console.log('[SUBMIT APP] ERROR: Neither email is verified');
             throw httpError(403, 'Verify your email with the OTP code before submitting your application.');
+        }
+
+        // If invitation email is verified but user's current email is different, mark it as verified
+        if (invitationEmailVerified && !userCurrentEmailVerified) {
+            const { markEmailVerified } = require('../services/otpService');
+            markEmailVerified(invitationEmail);
+            console.log('[SUBMIT APP] Marked invitation email as verified');
         }
 
         user.profile = {
@@ -429,6 +517,8 @@ async function submitEmployeeApplication(req, res, next) {
             designation: invitation.designation || user.profile?.designation || '',
             employeeId: invitation.employeeId || user.profile?.employeeId || ''
         };
+        console.log('[SUBMIT APP] Updating user profile email to:', invitation.invitedEmail);
+        
         user.officerVerification = {
             status: 'pending',
             requestedAt: new Date(),
@@ -449,8 +539,12 @@ async function submitEmployeeApplication(req, res, next) {
         };
         user.membershipStatus = 'pending_approval';
         user.membershipRejectionReason = '';
+        user.organizationId = invitation.organizationId; // CRITICAL: Set organizationId so admin can see pending request
         // Do NOT change role - preserve existing role until approved
+        console.log('[SUBMIT APP] Saving user with membershipStatus:', user.membershipStatus);
+        console.log('[SUBMIT APP] Saving user with organizationId:', user.organizationId);
         await user.save();
+        console.log('[SUBMIT APP] User saved successfully');
 
         const organization = await Organization.findById(invitation.organizationId);
         if (organization) {
@@ -465,8 +559,24 @@ async function submitEmployeeApplication(req, res, next) {
                 },
                 organization
             );
-        }
 
+            // Create in-app notification for organization admins
+            await notifyOrganizationAdmins({
+                organizationId: invitation.organizationId,
+                type: 'employee_application',
+                title: 'New employee application',
+                message: `${user.profile.displayName || invitation.invitedName} has submitted an application for your review.`,
+                actionUrl: '/admin/officer-approval',
+                metadata: {
+                    userId: user._id,
+                    invitationId: invitation._id,
+                    submittedAt: new Date()
+                },
+                excludeUserId: req.user.id
+            });
+
+            console.log('[INVITATION SUBMIT] Notification created for organization admins');
+        }
         res.json({
             success: true,
             message: 'Application submitted. You remain a citizen until the inviting organization admin approves it.',

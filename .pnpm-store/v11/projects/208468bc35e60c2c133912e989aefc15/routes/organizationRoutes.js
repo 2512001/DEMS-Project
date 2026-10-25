@@ -8,7 +8,8 @@ const {
     getOrganizationOverview,
     getOrganizationDetails,
     getOrganizationAdmins,
-    resolveOrganizationByCode
+    resolveOrganizationByCode,
+    updateOrganizationStatus
 } = require('../controllers/organizationController');
 const { protect } = require('../middleware/authMiddleware');
 const { authorizeRoles } = require('../middleware/roleMiddleware');
@@ -23,6 +24,7 @@ const router = express.Router();
 router.get('/directory', protect, authorizeRoles('super_admin'), listOrganizations);
 router.post('/create', protect, authorizeRoles('super_admin'), createOrganization);
 router.post('/assign-admin', protect, authorizeRoles('super_admin'), assignOrganizationAdmin);
+router.put('/:organizationId/status', protect, authorizeRoles('super_admin'), updateOrganizationStatus);
 
 // Organization Admin endpoints (static paths)
 router.get('/me', protect, getMyOrganization);

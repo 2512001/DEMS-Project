@@ -17,7 +17,9 @@ import {
   ShieldAlert,
   UploadCloud,
   User,
-  Users
+  Users,
+  FolderTree,
+  Trash2
 } from 'lucide-react';
 
 import { useAuth } from '../auth/AuthContext.jsx';
@@ -27,7 +29,6 @@ import GlobalSearch from '../components/layout/GlobalSearch.jsx';
 import NetworkStatus from '../components/layout/NetworkStatus.jsx';
 import NotificationsMenu from '../components/layout/NotificationsMenu.jsx';
 import UserMenu from '../components/layout/UserMenu.jsx';
-import { shortAddress } from '../utils/format.js';
 
 /**
  * Navigation is derived strictly from routes that exist in App.jsx.
@@ -78,12 +79,14 @@ const NAVIGATION = {
         { label: 'Dashboard', to: '/admin/dashboard', icon: LayoutDashboard },
         { label: 'Files', to: '/admin/evidence', icon: FolderLock },
         { label: 'Employees', to: '/admin/users', icon: Users },
+        { label: 'Groups', to: '/admin/groups', icon: FolderTree },
         { label: 'Employee approval', to: '/admin/officer-approval', icon: BadgeCheck }
       ]
     },
     {
       group: 'Security',
       items: [
+        { label: 'Pending uploads', to: '/admin/pending-uploads', icon: UploadCloud },
         { label: 'Quarantine', to: '/admin/quarantine', icon: ShieldAlert },
         { label: 'Modification requests', to: '/admin/modifications', icon: FileSearch },
         { label: 'Audit log', to: '/admin/audit-logs', icon: ClipboardList }
@@ -98,7 +101,13 @@ const NAVIGATION = {
     {
       group: 'Platform',
       items: [
-        { label: 'Platform overview', to: '/superadmin/dashboard', icon: LayoutDashboard }
+        { label: 'Platform overview', to: '/superadmin/dashboard', icon: LayoutDashboard },
+        { label: 'Users', to: '/superadmin/users', icon: Users },
+        { label: 'Evidence', to: '/superadmin/evidence', icon: FolderLock },
+        { label: 'Pending uploads', to: '/superadmin/pending-uploads', icon: UploadCloud },
+        { label: 'Blockchain', to: '/superadmin/blockchain', icon: Archive },
+        { label: 'Storage', to: '/superadmin/storage', icon: FileSearch },
+        { label: 'Retention', to: '/superadmin/retention', icon: Trash2 }
       ]
     }
   ]
@@ -127,10 +136,18 @@ const PAGE_NAMES = {
   '/admin/users': 'Employees',
   '/admin/evidence': 'Files',
   '/admin/quarantine': 'Quarantine',
+  '/admin/pending-uploads': 'Pending uploads',
   '/admin/modifications': 'Modification requests',
   '/admin/organization': 'Organization settings',
   '/admin/audit-logs': 'Audit log',
-  '/superadmin/dashboard': 'Platform overview'
+  '/admin/groups': 'Groups',
+  '/superadmin/dashboard': 'Platform overview',
+  '/superadmin/users': 'Users',
+  '/superadmin/evidence': 'Evidence',
+  '/superadmin/pending-uploads': 'Pending uploads',
+  '/superadmin/blockchain': 'Blockchain',
+  '/superadmin/storage': 'Storage',
+  '/superadmin/retention': 'Retention'
 };
 
 const DETAILS_BASE = {
@@ -293,9 +310,6 @@ function Topbar({ section, onChangeMobileOpen }) {
           <NetworkStatus />
           <NotificationsMenu />
           <div className="hidden h-6 w-px bg-line sm:block" />
-          <span className="hidden font-mono text-[12px] text-ink-faint xl:inline">
-            {shortAddress(walletAddress || user?.walletAddress)}
-          </span>
           <UserMenu />
         </div>
       </header>

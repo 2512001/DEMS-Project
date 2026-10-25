@@ -363,6 +363,56 @@ const resolveOrganizationByCode = async (req, res, next) => {
     }
 };
 
+const updateOrganizationStatus = async (req, res, next) => {
+    try {
+        // Only super admin can update organization status
+        if (!isSuperAdmin(req.user)) {
+            return res.status(403).json({ success: false, message: 'Only Super Admin can update organization status.' });
+        }
+
+        const { organizationId } = req.params;
+        const { status } = req.body;
+
+        if (!organizationId) {
+            return res.status(400).json({ success: false, message: 'Organization ID is required.' });
+        }
+
+        if (!status || !['active', 'suspended', 'pending'].includes(status)) {
+            return res.status(400).json({ success: false, message: 'Invalid status. Must be active, suspended, or pending.' });
+        }
+
+        const organization = await Organization.findById(organizationId);
+        if (!organization) {
+            return res.status(404).json({ success: false, message: 'Organization not found.' });
+        }
+
+        const previousStatus = organization.status;
+        organization.status = status;
+        await organization.save();
+
+        await writeAuditLog({
+            actor: req.user,
+            organizationId: organization._id,
+            action: 'organization_status_changed',
+            targetType: 'organization',
+            targetId: organization._id,
+            metadata: {
+                previousStatus,
+                newStatus: status,
+                organizationName: organization.name
+            }
+        });
+
+        return res.status(200).json({
+            success: true,
+            message: `Organization status updated to ${status}.`,
+            data: organization
+        });
+    } catch (err) {
+        next(err);
+    }
+};
+
 module.exports = {
     listOrganizations,
     createOrganization,
@@ -372,5 +422,6 @@ module.exports = {
     getOrganizationOverview,
     getOrganizationDetails,
     getOrganizationAdmins,
-    resolveOrganizationByCode
+    resolveOrganizationByCode,
+    updateOrganizationStatus
 };

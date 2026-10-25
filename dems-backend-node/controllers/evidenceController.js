@@ -141,12 +141,67 @@ const getOrganizationEvidence = async (req, res, next) => {
             return res.status(403).json({ success: false, message: 'You must belong to an organization to access organization evidence.' });
         }
 
-        const evidence = await EvidenceModel.find({ organizationId: req.user.organizationId })
-            .select('-encryption')
-            .sort({ createdAt: -1 })
-            .limit(200);
+        const page = parseInt(req.query.page, 10) || 1;
+        const limit = Math.min(parseInt(req.query.limit, 10) || 20, 100);
+        const skip = (page - 1) * limit;
 
-        return res.status(200).json({ success: true, count: evidence.length, data: evidence });
+        const search = req.query.search || '';
+        const status = req.query.status;
+        const blockchainStatus = req.query.blockchainStatus;
+        const storageStatus = req.query.storageStatus;
+        const uploaderWallet = req.query.uploaderWallet;
+        const sortBy = req.query.sortBy || 'createdAt';
+        const sortOrder = req.query.sortOrder === 'asc' ? 1 : -1;
+
+        const filter = { organizationId: req.user.organizationId };
+
+        if (search) {
+            filter.$or = [
+                { fileName: { $regex: search, $options: 'i' } },
+                { fileHash: { $regex: search, $options: 'i' } },
+                { caseId: { $regex: search, $options: 'i' } }
+            ];
+        }
+
+        if (status) {
+            filter.status = status;
+        }
+
+        if (blockchainStatus) {
+            filter.blockchainStatus = blockchainStatus;
+        }
+
+        if (storageStatus) {
+            filter.storageStatus = storageStatus;
+        }
+
+        if (uploaderWallet) {
+            filter.UploaderWallet = uploaderWallet.toLowerCase();
+        }
+
+        const [totalRecords, evidence] = await Promise.all([
+            EvidenceModel.countDocuments(filter),
+            EvidenceModel.find(filter)
+                .select('-encryption')
+                .populate('groupId', 'name')
+                .sort({ [sortBy]: sortOrder })
+                .skip(skip)
+                .limit(limit)
+        ]);
+
+        return res.status(200).json({
+            success: true,
+            count: evidence.length,
+            data: evidence,
+            pagination: {
+                page,
+                limit,
+                totalRecords,
+                totalPages: Math.ceil(totalRecords / limit) || 1,
+                hasNextPage: page < Math.ceil(totalRecords / limit),
+                hasPrevPage: page > 1
+            }
+        });
     } catch (err) {
         next(err);
     }
@@ -161,7 +216,7 @@ const getEvidenceById = async (req, res, next) => {
             return res.status(404).json({ success: false, message: 'Evidence not found.' });
         }
 
-        if (!canAccessEvidence(req.user, evidence)) {
+        if (!(await canAccessEvidence(req.user, evidence))) {
             return res.status(403).json({ success: false, message: 'You are not authorized to access this evidence.' });
         }
 
@@ -454,6 +509,113 @@ const checkWalletBalance = async (req, res, next) => {
     }
 };
 
+const getPlatformEvidence = async (req, res, next) => {
+    try {
+        // Only super admin can access platform-wide evidence
+        if (req.user.role !== 'super_admin') {
+            return res.status(403).json({ success: false, message: 'Only Super Admin can access platform-wide evidence data.' });
+        }
+
+        const page = parseInt(req.query.page, 10) || 1;
+        const limit = Math.min(parseInt(req.query.limit, 10) || 20, 100);
+        const skip = (page - 1) * limit;
+
+        const {
+            search = '',
+            status = '',
+            blockchainStatus = '',
+            organizationId = '',
+            groupId = '',
+            uploaderWallet = '',
+            fileType = '',
+            startDate = '',
+            endDate = '',
+            sortBy = 'createdAt',
+            sortOrder = 'desc'
+        } = req.query;
+
+        const filter = {};
+
+        if (search) {
+            filter.$or = [
+                { fileName: { $regex: search, $options: 'i' } },
+                { fileHash: { $regex: search, $options: 'i' } },
+                { caseId: { $regex: search, $options: 'i' } }
+            ];
+        }
+
+        if (status) {
+            filter.status = status;
+        }
+
+        if (blockchainStatus) {
+            filter.blockchainStatus = blockchainStatus;
+        }
+
+        if (organizationId) {
+            filter.organizationId = organizationId;
+        }
+
+        if (groupId) {
+            filter.groupId = groupId;
+        }
+
+        if (uploaderWallet) {
+            filter.UploaderWallet = uploaderWallet.toLowerCase();
+        }
+
+        if (fileType) {
+            if (fileType === 'image') {
+                filter.mimeType = { $regex: '^image/', $options: 'i' };
+            } else if (fileType === 'video') {
+                filter.mimeType = { $regex: '^video/', $options: 'i' };
+            } else if (fileType === 'audio') {
+                filter.mimeType = { $regex: '^audio/', $options: 'i' };
+            } else if (fileType === 'application/pdf') {
+                filter.mimeType = 'application/pdf';
+            } else if (fileType === 'application') {
+                filter.mimeType = { $regex: '^application/', $options: 'i', $not: /pdf$/ };
+            }
+        }
+
+        if (startDate || endDate) {
+            filter.createdAt = {};
+            if (startDate) {
+                filter.createdAt.$gte = new Date(startDate);
+            }
+            if (endDate) {
+                filter.createdAt.$lte = new Date(endDate);
+            }
+        }
+
+        const [totalRecords, evidence] = await Promise.all([
+            EvidenceModel.countDocuments(filter),
+            EvidenceModel.find(filter)
+                .select('-encryption')
+                .populate('groupId', 'name')
+                .populate('uploadedBy', 'profile.displayName walletAddress')
+                .populate('organizationId', 'name organizationCode')
+                .sort({ [sortBy]: sortOrder })
+                .skip(skip)
+                .limit(limit)
+        ]);
+
+        return res.status(200).json({
+            success: true,
+            count: evidence.length,
+            data: evidence,
+            pagination: {
+                page,
+                limit,
+                totalRecords,
+                totalPages: Math.ceil(totalRecords / limit)
+            }
+        });
+    } catch (err) {
+        next(err);
+    }
+};
+
 module.exports = {
     getEvidenceById,
     uploadEvidence,
@@ -462,6 +624,7 @@ module.exports = {
     finalizeEvidence,
     getUploadPolicy,
     getOrganizationEvidence,
+    getPlatformEvidence,
     markBlockchainFailed,
     retryBlockchainRegistration,
     checkWalletBalance

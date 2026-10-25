@@ -3,7 +3,6 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, CheckCircle2, ShieldAlert, XCircle } from 'lucide-react';
 import { getQuarantineById, listQuarantine, reviewQuarantine } from '../../api/admin.js';
 import StatusBadge from '../../components/StatusBadge.jsx';
-import HashValue from '../../components/HashValue.jsx';
 import PageHeader from '../../components/ui/PageHeader.jsx';
 import Modal from '../../components/ui/Modal.jsx';
 import EmptyState from '../../components/ui/EmptyState.jsx';
@@ -161,7 +160,7 @@ export default function QuarantineReview() {
               <div className="grid gap-3 sm:grid-cols-2">
                 <div>
                   <p className="detail-label">Uploader</p>
-                  <div className="mt-1"><HashValue value={record.UploaderWallet} compact /></div>
+                  <div className="mt-1"><span className="text-[13px] text-ink">Authorized uploader</span></div>
                 </div>
                 <div>
                   <p className="detail-label">Case</p>
@@ -171,14 +170,21 @@ export default function QuarantineReview() {
 
               <div>
                 <p className="detail-label">Original hash</p>
-                <div className="mt-1"><HashValue value={record.originalFileHash} compact={false} /></div>
+                <div className="mt-1"><span className="text-[13px] text-ink">Available</span></div>
               </div>
 
               <div className="rounded-[10px] border border-[#f0dfbd] bg-warn-soft p-3.5">
-                <p className="flex items-center gap-1.5 text-[12.5px] font-medium text-warn">
-                  <AlertTriangle size={13} />
-                  AI screening result
-                </p>
+                <div className="flex items-center justify-between">
+                  <p className="flex items-center gap-1.5 text-[12.5px] font-medium text-warn">
+                    <AlertTriangle size={13} />
+                    AI screening result
+                  </p>
+                  {record.aiAnalysis?.isDemo ? (
+                    <span className="text-[10.5px] font-semibold uppercase tracking-wide text-warn/70">
+                      DEMO RESULT
+                    </span>
+                  ) : null}
+                </div>
                 <dl className="mt-2 grid grid-cols-3 gap-2">
                   {[
                     ['Authenticity', record.aiAnalysis?.authenticityScore ?? record.aiAnalysis?.score],

@@ -16,13 +16,13 @@ import {
 
 import { updateProfile } from '../../api/auth.js';
 import { resolveOrganizationByCode, submitVerificationRequest } from '../../api/admin.js';
+import { apiClient } from '../../api/client.js';
 import { useAuth } from '../../auth/AuthContext.jsx';
 import StatusBadge from '../../components/StatusBadge.jsx';
 import PageHeader from '../../components/ui/PageHeader.jsx';
 import RoleBadge from '../../components/RoleBadge.jsx';
-import HashValue from '../../components/HashValue.jsx';
 import { useToast } from '../../components/ui/Toast.jsx';
-import { formatDate, initials, shortAddress } from '../../utils/format.js';
+import { formatDate, initials } from '../../utils/format.js';
 
 const profileSchema = z.object({
   displayName: z.string().max(120).optional(),
@@ -35,6 +35,13 @@ export default function Profile() {
   const [showEmployeeSection, setShowEmployeeSection] = useState(false);
   const [orgCode, setOrgCode] = useState('');
   const [resolvedOrg, setResolvedOrg] = useState(null);
+  const [isEditingProfile, setIsEditingProfile] = useState(false);
+  const [isEditingEmail, setIsEditingEmail] = useState(false);
+  const [newEmail, setNewEmail] = useState('');
+  const [otp, setOtp] = useState('');
+  const [otpSent, setOtpSent] = useState(false);
+  const [otpSending, setOtpSending] = useState(false);
+  const [otpVerifying, setOtpVerifying] = useState(false);
 
   const form = useForm({
     resolver: zodResolver(profileSchema),
@@ -73,6 +80,51 @@ export default function Profile() {
     onError: (err) => push(err?.response?.data?.message || 'Request could not be submitted.', { tone: 'error' })
   });
 
+  const sendOtp = async () => {
+    if (!newEmail || !newEmail.includes('@')) {
+      push('Please enter a valid email address.', { tone: 'error' });
+      return;
+    }
+    setOtpSending(true);
+    try {
+      await apiClient.post('/auth/send-email-otp', { email: newEmail });
+      setOtpSent(true);
+      push('OTP sent to your email. Please check your inbox.', { tone: 'success' });
+    } catch (err) {
+      push(err?.response?.data?.message || 'Failed to send OTP. Please try again.', { tone: 'error' });
+    } finally {
+      setOtpSending(false);
+    }
+  };
+
+  const verifyOtp = async () => {
+    if (!otp || otp.length !== 6) {
+      push('Please enter a valid 6-digit OTP.', { tone: 'error' });
+      return;
+    }
+    setOtpVerifying(true);
+    try {
+      await apiClient.post('/auth/verify-email-otp', { email: newEmail, otp });
+      await refreshUser();
+      push('Email updated successfully.', { tone: 'success' });
+      setIsEditingEmail(false);
+      setNewEmail('');
+      setOtp('');
+      setOtpSent(false);
+    } catch (err) {
+      push(err?.response?.data?.message || 'Invalid OTP. Please try again.', { tone: 'error' });
+    } finally {
+      setOtpVerifying(false);
+    }
+  };
+
+  const cancelEmailEdit = () => {
+    setIsEditingEmail(false);
+    setNewEmail('');
+    setOtp('');
+    setOtpSent(false);
+  };
+
   const submitVerification = (event) => {
     event.preventDefault();
     verification.mutate(new FormData(event.currentTarget));
@@ -110,7 +162,7 @@ export default function Profile() {
             <dl className="mt-5 grid gap-4 border-t border-line pt-4 sm:grid-cols-2">
               <div>
                 <dt className="detail-label">Wallet address</dt>
-                <dd className="mt-1"><HashValue value={wallet} compact /></dd>
+                <dd className="mt-1"><span className="text-[13px] text-ink">Authorized wallet</span></dd>
               </div>
               <div>
                 <dt className="detail-label">Member since</dt>
@@ -133,36 +185,156 @@ export default function Profile() {
             </dl>
           </section>
 
-          <form
-            className="section-card"
-            onSubmit={form.handleSubmit((values) => saveProfile.mutate(values))}
-          >
-            <h2 className="section-title">Personal details</h2>
-            <p className="section-subtitle">Shown to your organization administrators</p>
-
-            <div className="mt-4 space-y-4">
-              <label className="block">
-                <span className="label">Display name</span>
-                <input className="input" {...form.register('displayName')} />
-                {form.formState.errors.displayName ? (
-                  <span className="mt-1 block text-[12px] text-danger">{form.formState.errors.displayName.message}</span>
-                ) : null}
-              </label>
-
-              <label className="block">
-                <span className="label">Email</span>
-                <input className="input" type="email" {...form.register('email')} />
-                {form.formState.errors.email ? (
-                  <span className="mt-1 block text-[12px] text-danger">{form.formState.errors.email.message}</span>
-                ) : null}
-              </label>
+          <div className="section-card">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="section-title">Personal details</h2>
+                <p className="section-subtitle">Shown to your organization administrators</p>
+              </div>
+              {!isEditingProfile && (
+                <button
+                  type="button"
+                  onClick={() => setIsEditingProfile(true)}
+                  className="btn-secondary text-[13px]"
+                >
+                  Edit
+                </button>
+              )}
             </div>
 
-            <button type="submit" className="btn-primary mt-4" disabled={saveProfile.isPending}>
-              {saveProfile.isPending ? <Loader2 size={14} className="animate-spin" /> : null}
-              {saveProfile.isPending ? 'Saving…' : 'Save profile'}
-            </button>
-          </form>
+            {isEditingProfile ? (
+              <form onSubmit={form.handleSubmit((values) => {
+                saveProfile.mutate(values);
+                setIsEditingProfile(false);
+              })}>
+                <div className="mt-4 space-y-4">
+                  <label className="block">
+                    <span className="label">Display name</span>
+                    <input className="input" {...form.register('displayName')} />
+                    {form.formState.errors.displayName ? (
+                      <span className="mt-1 block text-[12px] text-danger">{form.formState.errors.displayName.message}</span>
+                    ) : null}
+                  </label>
+
+                  <div>
+                    <span className="label">Email</span>
+                    <div className="mt-1">
+                      <p className="text-[13px] text-ink-muted">{user?.profile?.email || 'No email set'}</p>
+                      <p className="mt-1 text-[11px] text-ink-faint">Email changes require OTP verification</p>
+                      {!isEditingEmail ? (
+                        <button
+                          type="button"
+                          onClick={() => setIsEditingEmail(true)}
+                          className="mt-2 btn-secondary text-[12px]"
+                        >
+                          Change email
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-4 flex gap-2">
+                  <button type="submit" className="btn-primary" disabled={saveProfile.isPending}>
+                    {saveProfile.isPending ? <Loader2 size={14} className="animate-spin" /> : null}
+                    {saveProfile.isPending ? 'Saving…' : 'Save'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsEditingProfile(false);
+                      form.reset();
+                    }}
+                    className="btn-secondary"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </form>
+            ) : (
+              <dl className="mt-4 space-y-3">
+                <div>
+                  <dt className="detail-label">Display name</dt>
+                  <dd className="detail-value">{user?.profile?.displayName || 'Not set'}</dd>
+                </div>
+                <div>
+                  <dt className="detail-label">Email</dt>
+                  <dd className="detail-value">{user?.profile?.email || 'Not set'}</dd>
+                </div>
+              </dl>
+            )}
+          </div>
+
+          {isEditingEmail && (
+            <div className="section-card alert-info">
+              <h3 className="text-[14px] font-semibold text-ink mb-3">Change email address</h3>
+              <div className="space-y-3">
+                <label className="block">
+                  <span className="label">New email address</span>
+                  <input
+                    className="input"
+                    type="email"
+                    value={newEmail}
+                    onChange={(e) => setNewEmail(e.target.value)}
+                    placeholder="Enter new email"
+                    disabled={otpSent}
+                  />
+                </label>
+
+                {!otpSent ? (
+                  <button
+                    type="button"
+                    onClick={sendOtp}
+                    className="btn-primary w-full"
+                    disabled={otpSending}
+                  >
+                    {otpSending ? <Loader2 size={14} className="animate-spin" /> : 'Send OTP'}
+                  </button>
+                ) : (
+                  <>
+                    <label className="block">
+                      <span className="label">Enter OTP</span>
+                      <input
+                        className="input"
+                        type="text"
+                        value={otp}
+                        onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                        placeholder="Enter 6-digit OTP"
+                        maxLength={6}
+                      />
+                    </label>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={verifyOtp}
+                        className="btn-primary flex-1"
+                        disabled={otpVerifying}
+                      >
+                        {otpVerifying ? <Loader2 size={14} className="animate-spin" /> : 'Verify & Update'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={cancelEmailEdit}
+                        className="btn-secondary"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setOtpSent(false);
+                        setOtp('');
+                      }}
+                      className="text-[12px] text-ink-muted hover:text-ink"
+                    >
+                      Resend OTP
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
+          )}
         </div>
 
         <section className="section-card self-start">
@@ -296,9 +468,9 @@ export default function Profile() {
 
           <div className="mt-5 border-t border-line pt-4">
             <p className="detail-label">Session wallet</p>
-            <p className="mt-1 flex items-center gap-1.5 font-mono text-[12.5px] text-ink-muted">
+            <p className="mt-1 flex items-center gap-1.5 text-[12.5px] text-ink-muted">
               <Wallet size={13} className="text-ink-faint" />
-              {shortAddress(wallet)}
+              Connected
             </p>
           </div>
         </section>

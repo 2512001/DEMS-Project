@@ -23,6 +23,12 @@ const evidenceSchema = new Schema({
         default: null,
         index: true
     },
+    groupId: {
+        type: Schema.Types.ObjectId,
+        ref: 'Group',
+        default: null,
+        index: true
+    },
     department: {
         type: String,
         default: null
@@ -65,6 +71,31 @@ const evidenceSchema = new Schema({
         iv: { type: String, default: null },
         authTag: { type: String, default: null },
         algorithm: { type: String, default: 'aes-256-gcm' }
+    },
+    // Multi-party key management (Phase 2)
+    keyVersion: {
+        type: String,
+        default: null
+    },
+    encryptedDEKs: {
+        user: {
+            encryptedDEK: { type: Buffer, default: null },
+            iv: { type: String, default: null },
+            authTag: { type: String, default: null },
+            algorithm: { type: String, default: 'aes-256-gcm' }
+        },
+        org_admin: {
+            encryptedDEK: { type: Buffer, default: null },
+            iv: { type: String, default: null },
+            authTag: { type: String, default: null },
+            algorithm: { type: String, default: 'aes-256-gcm' }
+        },
+        super_admin: {
+            encryptedDEK: { type: Buffer, default: null },
+            iv: { type: String, default: null },
+            authTag: { type: String, default: null },
+            algorithm: { type: String, default: 'aes-256-gcm' }
+        }
     },
     blockchainRequested: {
         type: Boolean,

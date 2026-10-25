@@ -2,7 +2,6 @@ import React, { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { BadgeCheck, Eye, FileText, User, XCircle } from 'lucide-react';
 import { getVerificationRequests, reviewVerificationRequest, reviewMembershipApplication } from '../../api/admin.js';
-import HashValue from '../../components/HashValue.jsx';
 import StatusBadge from '../../components/StatusBadge.jsx';
 import PageHeader from '../../components/ui/PageHeader.jsx';
 import EmptyState from '../../components/ui/EmptyState.jsx';
@@ -18,9 +17,10 @@ export default function OfficerApproval() {
   const queryClient = useQueryClient();
   const { push } = useToast();
   const [selectedUser, setSelectedUser] = useState(null);
-  const { data, isLoading, isError, refetch } = useQuery({
+  const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['verification-requests'],
-    queryFn: getVerificationRequests
+    queryFn: getVerificationRequests,
+    retry: false
   });
 
   const review = useMutation({
@@ -88,7 +88,7 @@ export default function OfficerApproval() {
             <dl className="mt-4 grid gap-4 sm:grid-cols-2">
               <div className="sm:col-span-2">
                 <dt className="detail-label">Wallet address</dt>
-                <dd className="mt-1"><HashValue value={selectedUser.walletAddress} compact={false} /></dd>
+                <dd className="mt-1"><span className="text-[13px] text-ink">Authorized applicant</span></dd>
               </div>
               <div>
                 <dt className="detail-label">Display name</dt>
@@ -188,7 +188,12 @@ export default function OfficerApproval() {
         <CardsSkeleton count={3} />
       ) : isError ? (
         <div className="section-card">
-          <div className="alert-danger">Verification requests could not be loaded.</div>
+          <div className="alert-danger">
+            Verification requests could not be loaded.
+            {error?.response?.data?.message && (
+              <p className="mt-2 text-sm">{error.response.data.message}</p>
+            )}
+          </div>
           <button type="button" className="btn-secondary btn-sm mt-3" onClick={() => refetch()}>Retry</button>
         </div>
       ) : requests.length === 0 ? (
@@ -215,7 +220,7 @@ export default function OfficerApproval() {
                       ? `Applied ${formatRelativeTime(user.officerVerification?.requestedAt)}`
                       : `Submitted ${formatDate(user.officerVerification?.requestedAt)}`}
                   </p>
-                  <div className="mt-1.5"><HashValue value={user.walletAddress} compact /></div>
+                  <div className="mt-1.5"><span className="text-[12px] text-ink-faint">Authorized applicant</span></div>
                 </div>
 
                 <div className="flex flex-wrap gap-2">

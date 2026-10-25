@@ -1,10 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
-import { Bell, CheckCircle2 } from 'lucide-react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { Bell, CheckCircle2, X } from 'lucide-react';
 import { useAuth } from '../../auth/AuthContext.jsx';
 import { listQuarantine, getOrganizationOverview } from '../../api/admin.js';
 import { getPlatformAnalytics } from '../../api/analytics.js';
+import { getNotifications, markAllNotificationsAsRead } from '../../api/notifications.js';
+import { useToast } from '../../components/ui/Toast.jsx';
 
 /**
  * Notification counts are derived from endpoints that already expose pending
@@ -13,12 +15,29 @@ import { getPlatformAnalytics } from '../../api/analytics.js';
  */
 export default function NotificationsMenu() {
   const { role } = useAuth();
+  const { push } = useToast();
+  const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
   const containerRef = useRef(null);
 
   const isAdmin = role === 'admin';
   const isOfficer = role === 'officer';
   const isSuperAdmin = role === 'super_admin';
+
+  // Fetch in-app notifications
+  const notifications = useQuery({
+    queryKey: ['notifications'],
+    queryFn: getNotifications,
+    enabled: isAdmin || isSuperAdmin,
+    refetchInterval: 30000 // Refetch every 30 seconds
+  });
+
+  const markAllRead = useMutation({
+    mutationFn: markAllNotificationsAsRead,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['notifications'] });
+    }
+  });
 
   const quarantine = useQuery({
     queryKey: ['quarantine'],
@@ -55,6 +74,25 @@ export default function NotificationsMenu() {
   }, [open]);
 
   const items = [];
+  const notificationItems = notifications.data?.data || [];
+  const unreadCount = notifications.data?.unreadCount || 0;
+
+  // Add in-app notifications first
+  if (notificationItems.length > 0) {
+    notificationItems.forEach((notif) => {
+      items.push({
+        id: notif._id,
+        title: notif.title,
+        detail: notif.message,
+        to: notif.actionUrl || '#',
+        tone: notif.read ? 'neutral' : 'brand',
+        isNotification: true,
+        notificationId: notif._id
+      });
+    });
+  }
+
+  // Then add derived counts (quarantine, applications, etc.)
   if (isAdmin) {
     const pendingReview = overview.data?.pendingReview || 0;
     const pendingApplications = overview.data?.pendingApplications || 0;
@@ -124,7 +162,7 @@ export default function NotificationsMenu() {
     }
   }
 
-  const count = items.length;
+  const count = unreadCount + items.filter(item => !item.isNotification).length;
 
   return (
     <div className="relative" ref={containerRef}>
@@ -145,7 +183,19 @@ export default function NotificationsMenu() {
         <div className="absolute right-0 top-11 z-50 w-[320px] animate-slide-up overflow-hidden rounded-card border border-line bg-card shadow-pop">
           <div className="flex items-center justify-between border-b border-line px-4 py-3">
             <p className="text-[13px] font-semibold text-ink">Notifications</p>
-            {count > 0 ? <span className="badge-warn">{count}</span> : null}
+            <div className="flex items-center gap-2">
+              {unreadCount > 0 ? (
+                <button
+                  type="button"
+                  className="text-[11.5px] text-brand hover:underline"
+                  onClick={() => markAllRead.mutate()}
+                  disabled={markAllRead.isPending}
+                >
+                  Mark all read
+                </button>
+              ) : null}
+              {count > 0 ? <span className="badge-warn">{count}</span> : null}
+            </div>
           </div>
           {count === 0 ? (
             <div className="flex items-start gap-2.5 px-4 py-6">
@@ -163,7 +213,13 @@ export default function NotificationsMenu() {
                 <li key={item.id}>
                   <Link
                     to={item.to}
-                    onClick={() => setOpen(false)}
+                    onClick={() => {
+                      setOpen(false);
+                      if (item.isNotification) {
+                        // Mark as read when clicked (handled by backend on navigation)
+                        queryClient.invalidateQueries({ queryKey: ['notifications'] });
+                      }
+                    }}
                     className="flex items-start gap-2.5 px-4 py-3 transition hover:bg-surface"
                   >
                     <span

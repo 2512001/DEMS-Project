@@ -24,11 +24,19 @@ import QuarantineReview from './pages/admin/QuarantineReview.jsx';
 import OrgEvidence from './pages/admin/OrgEvidence.jsx';
 import OrganizationSettings from './pages/admin/OrganizationSettings.jsx';
 import AdminModifications from './pages/admin/AdminModifications.jsx';
+import Groups from './pages/admin/Groups.jsx';
 import PendingReviews from './pages/officer/PendingReviews.jsx';
 import EmployeeModifications from './pages/officer/EmployeeModifications.jsx';
 import SuperAdminDashboard from './pages/superadmin/SuperAdminDashboard.jsx';
+import GlobalUsers from './pages/superadmin/GlobalUsers.jsx';
+import GlobalEvidence from './pages/superadmin/GlobalEvidence.jsx';
+import BlockchainMonitoring from './pages/superadmin/BlockchainMonitoring.jsx';
+import StorageMonitoring from './pages/superadmin/StorageMonitoring.jsx';
+import RetentionManagement from './pages/superadmin/RetentionManagement.jsx';
+import SuperAdminPendingUploads from './pages/superadmin/PendingUploads.jsx';
 import AdminInvitation from './pages/invitation/AdminInvitation.jsx';
 import EmployeeInvitation from './pages/invitation/EmployeeInvitation.jsx';
+import PendingUploads from './pages/admin/PendingUploads.jsx';
 
 export default function App() {
   return (
@@ -75,8 +83,11 @@ export default function App() {
           <Route path="/admin/dashboard" element={<AdminDashboard />} />
           <Route path="/admin/officer-approval" element={<OfficerApproval />} />
           <Route path="/admin/users" element={<UserManagement />} />
+          <Route path="/admin/groups" element={<Groups />} />
           <Route path="/admin/evidence" element={<OrgEvidence />} />
+          <Route path="/admin/evidence/:evidenceId" element={<EvidenceDetails />} />
           <Route path="/admin/quarantine" element={<QuarantineReview />} />
+          <Route path="/admin/pending-uploads" element={<PendingUploads />} />
           <Route path="/admin/modifications" element={<AdminModifications />} />
           <Route path="/admin/organization" element={<OrganizationSettings />} />
           <Route path="/admin/audit-logs" element={<AuditLogs />} />
@@ -87,6 +98,13 @@ export default function App() {
         <Route element={<AppLayout section="superadmin" />}>
           <Route path="/superadmin" element={<SuperAdminDashboard />} />
           <Route path="/superadmin/dashboard" element={<SuperAdminDashboard />} />
+          <Route path="/superadmin/users" element={<GlobalUsers />} />
+          <Route path="/superadmin/evidence" element={<GlobalEvidence />} />
+          <Route path="/superadmin/evidence/:evidenceId" element={<EvidenceDetails />} />
+          <Route path="/superadmin/blockchain" element={<BlockchainMonitoring />} />
+          <Route path="/superadmin/storage" element={<StorageMonitoring />} />
+          <Route path="/superadmin/retention" element={<RetentionManagement />} />
+          <Route path="/superadmin/pending-uploads" element={<SuperAdminPendingUploads />} />
         </Route>
       </Route>
 
